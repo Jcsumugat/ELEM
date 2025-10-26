@@ -209,23 +209,18 @@ if (!empty($filters['grade'])) {
 
             <nav class="sidebar-nav">
                 <div class="nav-item active">
-                    <i class="fas fa-chart-line"></i>
                     <span>Dashboard</span>
                 </div>
                 <div class="nav-item" onclick="location.href='students.php'">
-                    <i class="fas fa-users"></i>
                     <span>Students</span>
                 </div>
                 <div class="nav-item" onclick="location.href='attendance.php'">
-                    <i class="fas fa-clipboard-check"></i>
                     <span>Mark Attendance</span>
                 </div>
                 <div class="nav-item" onclick="location.href='records.php'">
-                    <i class="fas fa-history"></i>
                     <span>Attendance Records</span>
                 </div>
                 <div class="nav-item" onclick="location.href='reports.php'">
-                    <i class="fas fa-file-alt"></i>
                     <span>Reports</span>
                 </div>
             </nav>

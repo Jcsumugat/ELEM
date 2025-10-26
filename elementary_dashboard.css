@@ -316,7 +316,7 @@ body::before {
 }
 
 .filter-section::before {
-    content: '🎨';
+    content: '';
     position: absolute;
     top: -15px;
     left: 30px;

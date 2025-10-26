@@ -7,9 +7,7 @@ $conn = getDBConnection();
 // Initialize session filters if not set
 if (!isset($_SESSION['student_filters'])) {
     $_SESSION['student_filters'] = [
-        'department' => '',
-        'course' => '',
-        'year' => '',
+        'grade' => '',
         'section' => ''
     ];
 }
@@ -17,9 +15,7 @@ if (!isset($_SESSION['student_filters'])) {
 // Update filters from POST request
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_filters'])) {
     $_SESSION['student_filters'] = [
-        'department' => $_POST['filter_department'] ?? '',
-        'course' => $_POST['filter_course'] ?? '',
-        'year' => $_POST['filter_year'] ?? '',
+        'grade' => $_POST['filter_grade'] ?? '',
         'section' => $_POST['filter_section'] ?? ''
     ];
 }
@@ -28,45 +24,42 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_filters'])) {
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['ajax'])) {
     $action = $_POST['action'] ?? '';
 
-    if ($action === 'get_courses') {
-        $department_id = (int)$_POST['department_id'];
-        $stmt = $conn->prepare("SELECT id, code, name FROM courses WHERE department_id = ? AND is_active = 1 ORDER BY name");
-        $stmt->bind_param("i", $department_id);
+    if ($action === 'get_sections') {
+        $grade_id = (int)$_POST['grade_id'];
+        $stmt = $conn->prepare("SELECT id, name, room_number FROM sections WHERE grade_level_id = ? AND is_active = 1 ORDER BY name");
+        $stmt->bind_param("i", $grade_id);
         $stmt->execute();
         $result = $stmt->get_result();
 
-        $courses = [];
+        $sections = [];
         while ($row = $result->fetch_assoc()) {
-            $courses[] = $row;
+            $sections[] = $row;
         }
-        jsonResponse(true, 'Courses found', $courses);
+        jsonResponse(true, 'Sections found', $sections);
     }
 
     if ($action === 'add') {
-        $student_id = sanitizeInput($_POST['student_id']);
         $firstname = sanitizeInput($_POST['firstname']);
         $lastname = sanitizeInput($_POST['lastname']);
         $middlename = sanitizeInput($_POST['middlename']);
-        $email = sanitizeInput($_POST['email']);
-        $department_id = (int)$_POST['department_id'];
-        $course_id = (int)$_POST['course_id'];
-        $year_level = sanitizeInput($_POST['year_level']);
+        $grade_level_id = (int)$_POST['grade_level_id'];
         $section_id = (int)$_POST['section_id'];
-        $contact = sanitizeInput($_POST['contact']);
+        $date_of_birth = sanitizeInput($_POST['date_of_birth']);
+        $gender = sanitizeInput($_POST['gender']);
+        $parent_name = sanitizeInput($_POST['parent_name']);
+        $parent_contact = sanitizeInput($_POST['parent_contact']);
+        $parent_email = sanitizeInput($_POST['parent_email']);
+        $address = sanitizeInput($_POST['address']);
 
-        // Check if student_id already exists
-        $checkStmt = $conn->prepare("SELECT id FROM students WHERE student_id = ?");
-        $checkStmt->bind_param("s", $student_id);
-        $checkStmt->execute();
-        if ($checkStmt->get_result()->num_rows > 0) {
-            jsonResponse(false, 'Student ID already exists');
-        }
+        // Generate student ID
+        $student_id = generateStudentID($conn, $grade_level_id);
 
-        $stmt = $conn->prepare("INSERT INTO students (student_id, firstname, lastname, middlename, email, department_id, course_id, year_level, section_id, contact) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
-        $stmt->bind_param("sssssiisis", $student_id, $firstname, $lastname, $middlename, $email, $department_id, $course_id, $year_level, $section_id, $contact);
+        $stmt = $conn->prepare("INSERT INTO students (student_id, firstname, lastname, middlename, grade_level_id, section_id, date_of_birth, gender, parent_name, parent_contact, parent_email, address) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+        $stmt->bind_param("sssiisssssss", $student_id, $firstname, $lastname, $middlename, $grade_level_id, $section_id, $date_of_birth, $gender, $parent_name, $parent_contact, $parent_email, $address);
 
         if ($stmt->execute()) {
-            jsonResponse(true, 'Student added successfully');
+            logActivity($conn, $_SESSION['user_id'], 'Add Student', "Added student: $firstname $lastname ($student_id)");
+            jsonResponse(true, 'Student added successfully', ['student_id' => $student_id]);
         } else {
             jsonResponse(false, 'Failed to add student');
         }
@@ -74,29 +67,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['ajax'])) {
 
     if ($action === 'edit') {
         $id = (int)$_POST['id'];
-        $student_id = sanitizeInput($_POST['student_id']);
         $firstname = sanitizeInput($_POST['firstname']);
         $lastname = sanitizeInput($_POST['lastname']);
         $middlename = sanitizeInput($_POST['middlename']);
-        $email = sanitizeInput($_POST['email']);
-        $department_id = (int)$_POST['department_id'];
-        $course_id = (int)$_POST['course_id'];
-        $year_level = sanitizeInput($_POST['year_level']);
+        $grade_level_id = (int)$_POST['grade_level_id'];
         $section_id = (int)$_POST['section_id'];
-        $contact = sanitizeInput($_POST['contact']);
+        $date_of_birth = sanitizeInput($_POST['date_of_birth']);
+        $gender = sanitizeInput($_POST['gender']);
+        $parent_name = sanitizeInput($_POST['parent_name']);
+        $parent_contact = sanitizeInput($_POST['parent_contact']);
+        $parent_email = sanitizeInput($_POST['parent_email']);
+        $address = sanitizeInput($_POST['address']);
 
-        // Check if student_id exists for other students
-        $checkStmt = $conn->prepare("SELECT id FROM students WHERE student_id = ? AND id != ?");
-        $checkStmt->bind_param("si", $student_id, $id);
-        $checkStmt->execute();
-        if ($checkStmt->get_result()->num_rows > 0) {
-            jsonResponse(false, 'Student ID already exists');
-        }
-
-        $stmt = $conn->prepare("UPDATE students SET student_id=?, firstname=?, lastname=?, middlename=?, email=?, department_id=?, course_id=?, year_level=?, section_id=?, contact=? WHERE id=?");
-        $stmt->bind_param("sssssiisisi", $student_id, $firstname, $lastname, $middlename, $email, $department_id, $course_id, $year_level, $section_id, $contact, $id);
+        $stmt = $conn->prepare("UPDATE students SET firstname=?, lastname=?, middlename=?, grade_level_id=?, section_id=?, date_of_birth=?, gender=?, parent_name=?, parent_contact=?, parent_email=?, address=? WHERE id=?");
+        $stmt->bind_param("ssiisssssssi", $firstname, $lastname, $middlename, $grade_level_id, $section_id, $date_of_birth, $gender, $parent_name, $parent_contact, $parent_email, $address, $id);
 
         if ($stmt->execute()) {
+            logActivity($conn, $_SESSION['user_id'], 'Update Student', "Updated student: $firstname $lastname (ID: $id)");
             jsonResponse(true, 'Student updated successfully');
         } else {
             jsonResponse(false, 'Failed to update student');
@@ -109,6 +96,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['ajax'])) {
         $stmt->bind_param("i", $id);
 
         if ($stmt->execute()) {
+            logActivity($conn, $_SESSION['user_id'], 'Delete Student', "Deleted student ID: $id");
             jsonResponse(true, 'Student deleted successfully');
         } else {
             jsonResponse(false, 'Failed to delete student');
@@ -138,22 +126,10 @@ $types = "";
 
 $filters = $_SESSION['student_filters'];
 
-if (!empty($filters['department'])) {
-    $whereConditions[] = "s.department_id = ?";
-    $params[] = $filters['department'];
+if (!empty($filters['grade'])) {
+    $whereConditions[] = "s.grade_level_id = ?";
+    $params[] = $filters['grade'];
     $types .= "i";
-}
-
-if (!empty($filters['course'])) {
-    $whereConditions[] = "s.course_id = ?";
-    $params[] = $filters['course'];
-    $types .= "i";
-}
-
-if (!empty($filters['year'])) {
-    $whereConditions[] = "s.year_level = ?";
-    $params[] = $filters['year'];
-    $types .= "s";
 }
 
 if (!empty($filters['section'])) {
@@ -166,17 +142,15 @@ $whereClause = implode(" AND ", $whereConditions);
 
 $query = "SELECT 
     s.*,
-    d.code as department_code,
-    d.name as department_name,
-    c.code as course_code,
-    c.name as course_name,
-    sec.name as section_name
+    gl.grade_name,
+    gl.grade_number,
+    sec.name as section_name,
+    sec.room_number
     FROM students s
-    JOIN departments d ON s.department_id = d.id
-    JOIN courses c ON s.course_id = c.id
+    JOIN grade_levels gl ON s.grade_level_id = gl.id
     JOIN sections sec ON s.section_id = sec.id
     WHERE $whereClause
-    ORDER BY s.created_at DESC";
+    ORDER BY gl.grade_number, sec.name, s.lastname, s.firstname";
 
 if (!empty($params)) {
     $stmt = $conn->prepare($query);
@@ -187,19 +161,16 @@ if (!empty($params)) {
     $students = $conn->query($query);
 }
 
-// Get departments for dropdown
-$departments = $conn->query("SELECT id, code, name FROM departments WHERE is_active = 1 ORDER BY name");
+// Get grade levels for dropdown
+$grade_levels = $conn->query("SELECT id, grade_number, grade_name FROM grade_levels WHERE is_active = 1 ORDER BY grade_number");
 
-// Get sections for dropdown
-$sections = $conn->query("SELECT id, name FROM sections WHERE is_active = 1 ORDER BY name");
-
-// Get courses for the selected department filter
-$filter_courses = [];
-if (!empty($filters['department'])) {
-    $stmt = $conn->prepare("SELECT id, code, name FROM courses WHERE department_id = ? AND is_active = 1 ORDER BY name");
-    $stmt->bind_param("i", $filters['department']);
+// Get sections for the selected grade level filter
+$filter_sections = [];
+if (!empty($filters['grade'])) {
+    $stmt = $conn->prepare("SELECT id, name, room_number FROM sections WHERE grade_level_id = ? AND is_active = 1 ORDER BY name");
+    $stmt->bind_param("i", $filters['grade']);
     $stmt->execute();
-    $filter_courses = $stmt->get_result();
+    $filter_sections = $stmt->get_result();
 }
 ?>
 <!DOCTYPE html>
@@ -208,10 +179,10 @@ if (!empty($filters['department'])) {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Students Management - Attendance System</title>
+    <title>Students Management - Elementary Attendance System</title>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
-    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="dashboard.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="elementary_dashboard.css">
     <style>
         .action-bar {
             display: flex;
@@ -231,16 +202,20 @@ if (!empty($filters['department'])) {
         .search-box input {
             width: 100%;
             padding: 12px 45px 12px 20px;
-            background: rgba(255, 255, 255, 0.05);
-            border: 2px solid rgba(157, 78, 221, 0.3);
-            border-radius: 10px;
-            color: var(--text-light);
-            font-size: 0.95rem;
+            background: var(--hover-bg);
+            border: 2px solid var(--border-color);
+            border-radius: 12px;
+            color: var(--text-primary);
+            font-size: 0.9rem;
+            font-family: 'Inter', sans-serif;
+            transition: all 0.3s ease;
         }
 
         .search-box input:focus {
             outline: none;
-            border-color: var(--accent-green);
+            border-color: var(--accent-purple);
+            background: white;
+            box-shadow: 0 0 0 4px rgba(181, 101, 216, 0.1);
         }
 
         .search-box i {
@@ -253,10 +228,31 @@ if (!empty($filters['department'])) {
 
         .quick-filter-section {
             background: var(--card-bg);
-            border: 1px solid rgba(157, 78, 221, 0.3);
-            border-radius: 15px;
-            padding: 20px;
+            border-radius: 20px;
+            padding: 20px 24px;
             margin-bottom: 20px;
+            box-shadow: var(--shadow);
+            border: 3px dashed var(--accent-yellow);
+            position: relative;
+        }
+
+        .quick-filter-section::before {
+            position: absolute;
+            top: -15px;
+            left: 30px;
+            font-size: 2rem;
+            background: white;
+            padding: 0 10px;
+        }
+
+        .quick-filter-section h3 {
+            color: var(--text-primary);
+            margin-bottom: 15px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-size: 1.1rem;
+            font-weight: 700;
         }
 
         .quick-filter-grid {
@@ -269,93 +265,52 @@ if (!empty($filters['department'])) {
         .quick-filter-grid .filter-group {
             display: flex;
             flex-direction: column;
-            gap: 8px;
+            gap: 6px;
         }
 
         .quick-filter-grid .filter-group label {
             color: var(--text-secondary);
             font-size: 0.85rem;
-            font-weight: 500;
+            font-weight: 600;
         }
 
         .quick-filter-grid .filter-group select {
-            padding: 10px 12px;
-            background: rgba(255, 255, 255, 0.05);
-            border: 2px solid rgba(157, 78, 221, 0.3);
-            border-radius: 8px;
-            color: var(--text-light);
-            font-size: 0.9rem;
-        }
-
-        .quick-filter-grid .filter-group select option {
-            background: var(--card-bg);
-            color: var(--text-light);
+            padding: 10px 14px;
+            background: var(--hover-bg);
+            border: 2px solid var(--border-color);
+            border-radius: 10px;
+            color: var(--text-primary);
+            font-size: 0.85rem;
+            font-family: 'Inter', sans-serif;
+            transition: all 0.3s ease;
         }
 
         .quick-filter-grid .filter-group select:focus {
             outline: none;
-            border-color: var(--accent-green);
-        }
-
-        .btn-apply-filter {
-            padding: 10px 20px;
-            background: linear-gradient(135deg, var(--primary-blue), var(--primary-blue-dark));
-            color: white;
-            border: none;
-            border-radius: 8px;
-            cursor: pointer;
-            font-weight: 600;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            gap: 8px;
-            transition: all 0.3s ease;
-            height: 42px;
-        }
-
-        .btn-apply-filter:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 8px 20px rgba(74, 144, 226, 0.3);
-        }
-
-        .btn-clear-filter {
-            padding: 10px 20px;
-            background: rgba(255, 71, 87, 0.1);
-            color: var(--error);
-            border: 2px solid var(--error);
-            border-radius: 8px;
-            cursor: pointer;
-            font-weight: 600;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            gap: 8px;
-            transition: all 0.3s ease;
-            height: 42px;
-        }
-
-        .btn-clear-filter:hover {
-            background: var(--error);
-            color: white;
+            border-color: var(--accent-purple);
+            background: white;
+            box-shadow: 0 0 0 4px rgba(181, 101, 216, 0.1);
         }
 
         .add-btn {
             padding: 12px 25px;
-            background: linear-gradient(135deg, var(--accent-green), #00a86b);
+            background: linear-gradient(135deg, var(--accent-green), var(--primary-teal));
             color: white;
             border: none;
-            border-radius: 10px;
+            border-radius: 12px;
             cursor: pointer;
             font-weight: 600;
             display: flex;
             align-items: center;
             gap: 10px;
             transition: all 0.3s ease;
+            font-size: 0.9rem;
+            box-shadow: var(--shadow);
         }
 
         .add-btn:hover {
             transform: translateY(-2px);
-            box-shadow: 0 10px 25px rgba(0, 208, 132, 0.3);
+            box-shadow: var(--shadow-md);
         }
 
         .modal {
@@ -377,13 +332,14 @@ if (!empty($filters['department'])) {
 
         .modal-content {
             background: var(--card-bg);
-            border: 1px solid rgba(157, 78, 221, 0.3);
-            border-radius: 15px;
+            border-radius: 20px;
             padding: 30px;
             width: 90%;
-            max-width: 700px;
+            max-width: 800px;
             max-height: 90vh;
             overflow-y: auto;
+            box-shadow: var(--shadow-lg);
+            border: 3px solid var(--accent-orange);
         }
 
         .modal-header {
@@ -394,10 +350,12 @@ if (!empty($filters['department'])) {
         }
 
         .modal-header h2 {
-            color: var(--text-light);
+            color: var(--text-primary);
             display: flex;
             align-items: center;
             gap: 10px;
+            font-size: 1.5rem;
+            font-weight: 700;
         }
 
         .close-modal {
@@ -406,11 +364,18 @@ if (!empty($filters['department'])) {
             color: var(--text-secondary);
             font-size: 1.5rem;
             cursor: pointer;
-            transition: color 0.3s;
+            transition: all 0.3s;
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
         }
 
         .close-modal:hover {
-            color: var(--error);
+            color: var(--danger);
+            background: rgba(239, 68, 68, 0.1);
         }
 
         .form-grid {
@@ -420,7 +385,7 @@ if (!empty($filters['department'])) {
         }
 
         .form-group {
-            margin-bottom: 20px;
+            margin-bottom: 0;
         }
 
         .form-group.full-width {
@@ -431,128 +396,191 @@ if (!empty($filters['department'])) {
             display: block;
             color: var(--text-secondary);
             font-size: 0.85rem;
-            margin-bottom: 8px;
-            font-weight: 500;
+            margin-bottom: 6px;
+            font-weight: 600;
         }
 
         .form-group input,
-        .form-group select {
+        .form-group select,
+        .form-group textarea {
             width: 100%;
-            padding: 12px 15px;
-            background: rgba(255, 255, 255, 0.05);
-            border: 2px solid rgba(157, 78, 221, 0.3);
-            border-radius: 8px;
-            color: var(--text-light);
-            font-size: 0.95rem;
+            padding: 10px 14px;
+            background: var(--hover-bg);
+            border: 2px solid var(--border-color);
+            border-radius: 10px;
+            color: var(--text-primary);
+            font-size: 0.85rem;
+            font-family: 'Inter', sans-serif;
+            transition: all 0.3s ease;
         }
 
-        .form-group select option {
-            background: var(--card-bg);
-            color: var(--text-light);
+        .form-group textarea {
+            resize: vertical;
+            min-height: 80px;
         }
 
         .form-group input:focus,
-        .form-group select:focus {
+        .form-group select:focus,
+        .form-group textarea:focus {
             outline: none;
-            border-color: var(--accent-green);
+            border-color: var(--accent-purple);
+            background: white;
+            box-shadow: 0 0 0 4px rgba(181, 101, 216, 0.1);
         }
 
         .form-actions {
             display: flex;
             gap: 15px;
             margin-top: 25px;
+            grid-column: 1 / -1;
         }
 
         .btn-submit {
             flex: 1;
             padding: 12px;
-            background: linear-gradient(135deg, var(--primary-blue), var(--primary-blue-dark));
+            background: linear-gradient(135deg, var(--primary-blue), var(--primary-teal));
             color: white;
             border: none;
-            border-radius: 8px;
+            border-radius: 10px;
             cursor: pointer;
             font-weight: 600;
             transition: all 0.3s ease;
+            font-size: 0.9rem;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            box-shadow: var(--shadow);
         }
 
         .btn-submit:hover {
             transform: translateY(-2px);
-            box-shadow: 0 10px 25px rgba(74, 144, 226, 0.3);
+            box-shadow: var(--shadow-md);
         }
 
         .btn-cancel {
             flex: 1;
             padding: 12px;
-            background: rgba(255, 71, 87, 0.1);
-            color: var(--error);
-            border: 2px solid var(--error);
-            border-radius: 8px;
+            background: white;
+            color: var(--danger);
+            border: 2px solid var(--danger);
+            border-radius: 10px;
             cursor: pointer;
             font-weight: 600;
             transition: all 0.3s ease;
+            font-size: 0.9rem;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
         }
 
         .btn-cancel:hover {
-            background: var(--error);
+            background: var(--danger);
             color: white;
         }
 
         .action-buttons {
             display: flex;
             gap: 10px;
+            justify-content: center;
         }
 
         .btn-icon {
             padding: 8px 12px;
             border: none;
-            border-radius: 6px;
+            border-radius: 8px;
             cursor: pointer;
             transition: all 0.3s ease;
             font-size: 0.9rem;
+            display: flex;
+            align-items: center;
+            gap: 6px;
         }
 
         .btn-edit {
             background: rgba(74, 144, 226, 0.1);
             color: var(--primary-blue);
-            border: 1px solid var(--primary-blue);
+            border: 2px solid var(--primary-blue);
         }
 
         .btn-edit:hover {
             background: var(--primary-blue);
             color: white;
+            transform: translateY(-2px);
+            box-shadow: var(--shadow);
         }
 
         .btn-delete {
-            background: rgba(255, 71, 87, 0.1);
-            color: var(--error);
-            border: 1px solid var(--error);
+            background: rgba(239, 68, 68, 0.1);
+            color: var(--danger);
+            border: 2px solid var(--danger);
         }
 
         .btn-delete:hover {
-            background: var(--error);
+            background: var(--danger);
             color: white;
+            transform: translateY(-2px);
+            box-shadow: var(--shadow);
         }
 
-        .empty-state {
-            text-align: center;
-            padding: 60px 20px;
-            color: var(--text-secondary);
-        }
-
-        .empty-state i {
-            font-size: 4rem;
-            margin-bottom: 20px;
-            opacity: 0.3;
-        }
-
-        .year-section {
-            display: inline-block;
-            padding: 4px 10px;
-            background: rgba(74, 144, 226, 0.1);
-            border-radius: 6px;
-            color: var(--primary-blue);
+        .grade-section-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 6px 12px;
+            background: linear-gradient(135deg, var(--accent-orange), var(--accent-yellow));
+            border-radius: 20px;
+            color: white;
             font-weight: 600;
-            font-size: 0.85rem;
+            font-size: 0.8rem;
+            box-shadow: var(--shadow);
+        }
+
+        .student-id-badge {
+            display: inline-flex;
+            align-items: center;
+            padding: 6px 12px;
+            background: linear-gradient(135deg, var(--primary-blue), var(--primary-teal));
+            border-radius: 20px;
+            color: white;
+            font-weight: 600;
+            font-size: 0.8rem;
+            box-shadow: var(--shadow);
+        }
+
+        .gender-badge {
+            padding: 4px 10px;
+            border-radius: 12px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            display: inline-block;
+        }
+
+        .gender-male {
+            background: rgba(74, 144, 226, 0.1);
+            color: var(--primary-blue);
+            border: 2px solid var(--primary-blue);
+        }
+
+        .gender-female {
+            background: rgba(255, 111, 145, 0.1);
+            color: var(--accent-pink);
+            border: 2px solid var(--accent-pink);
+        }
+
+        @media (max-width: 768px) {
+            .form-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .action-bar {
+                flex-direction: column;
+            }
+
+            .search-box {
+                max-width: 100%;
+            }
         }
     </style>
 </head>
@@ -561,8 +589,8 @@ if (!empty($filters['department'])) {
     <div class="dashboard-container">
         <aside class="sidebar">
             <div class="sidebar-header">
-                <h2>Attendance System</h2>
-                <p><?php echo htmlspecialchars($_SESSION['role']); ?></p>
+                <h2>Elementary School</h2>
+                <p>Attendance System</p>
             </div>
 
             <nav class="sidebar-nav">
@@ -588,17 +616,19 @@ if (!empty($filters['department'])) {
                 </div>
             </nav>
 
-            <div class="sidebar-footer">
-                <button class="logout-btn" onclick="logout()">
-                    <i class="fas fa-sign-out-alt"></i> Logout
-                </button>
-            </div>
+            <button class="logout-btn" onclick="logout()">
+                <i class="fas fa-sign-out-alt"></i> Logout
+            </button>
         </aside>
 
         <main class="main-content">
             <div class="header">
                 <h1 class="page-title">Students Management</h1>
                 <div class="header-actions">
+                    <div class="date-display">
+                        <i class="fas fa-calendar-day"></i>
+                        <span><?php echo date('l, F d, Y'); ?></span>
+                    </div>
                     <div class="user-profile">
                         <div class="user-avatar"><?php echo strtoupper(substr($_SESSION['fullname'], 0, 2)); ?></div>
                         <span><?php echo htmlspecialchars($_SESSION['fullname']); ?></span>
@@ -610,7 +640,7 @@ if (!empty($filters['department'])) {
 
             <!-- Quick Filter Section -->
             <div class="quick-filter-section">
-                <h3 style="color: var(--text-light); margin-bottom: 15px; display: flex; align-items: center; gap: 10px;">
+                <h3>
                     <i class="fas fa-filter"></i>
                     Quick Filters
                 </h3>
@@ -618,46 +648,17 @@ if (!empty($filters['department'])) {
                     <input type="hidden" name="update_filters" value="1">
                     <div class="quick-filter-grid">
                         <div class="filter-group">
-                            <label>Department</label>
-                            <select id="quick_department" name="filter_department" onchange="loadQuickCourses()">
-                                <option value="">All Departments</option>
+                            <label>Grade Level</label>
+                            <select id="quick_grade" name="filter_grade" onchange="loadQuickSections()">
+                                <option value="">All Grades</option>
                                 <?php
-                                $departments->data_seek(0);
-                                while ($dept = $departments->fetch_assoc()):
+                                $grade_levels->data_seek(0);
+                                while ($grade = $grade_levels->fetch_assoc()):
                                 ?>
-                                    <option value="<?php echo $dept['id']; ?>" <?php echo ($filters['department'] == $dept['id']) ? 'selected' : ''; ?>>
-                                        <?php echo htmlspecialchars($dept['code'] . ' - ' . $dept['name']); ?>
+                                    <option value="<?php echo $grade['id']; ?>" <?php echo ($filters['grade'] == $grade['id']) ? 'selected' : ''; ?>>
+                                        <?php echo htmlspecialchars($grade['grade_name']); ?>
                                     </option>
                                 <?php endwhile; ?>
-                            </select>
-                        </div>
-
-                        <div class="filter-group">
-                            <label>Course</label>
-                            <select id="quick_course" name="filter_course">
-                                <option value="">All Courses</option>
-                                <?php
-                                if ($filter_courses && $filter_courses->num_rows > 0):
-                                    while ($course = $filter_courses->fetch_assoc()):
-                                ?>
-                                        <option value="<?php echo $course['id']; ?>" <?php echo ($filters['course'] == $course['id']) ? 'selected' : ''; ?>>
-                                            <?php echo htmlspecialchars($course['code'] . ' - ' . $course['name']); ?>
-                                        </option>
-                                <?php
-                                    endwhile;
-                                endif;
-                                ?>
-                            </select>
-                        </div>
-
-                        <div class="filter-group">
-                            <label>Year Level</label>
-                            <select id="quick_year" name="filter_year">
-                                <option value="">All Years</option>
-                                <option value="1st Year" <?php echo ($filters['year'] == '1st Year') ? 'selected' : ''; ?>>1st Year</option>
-                                <option value="2nd Year" <?php echo ($filters['year'] == '2nd Year') ? 'selected' : ''; ?>>2nd Year</option>
-                                <option value="3rd Year" <?php echo ($filters['year'] == '3rd Year') ? 'selected' : ''; ?>>3rd Year</option>
-                                <option value="4th Year" <?php echo ($filters['year'] == '4th Year') ? 'selected' : ''; ?>>4th Year</option>
                             </select>
                         </div>
 
@@ -666,13 +667,16 @@ if (!empty($filters['department'])) {
                             <select id="quick_section" name="filter_section">
                                 <option value="">All Sections</option>
                                 <?php
-                                $sections->data_seek(0);
-                                while ($section = $sections->fetch_assoc()):
+                                if ($filter_sections && $filter_sections->num_rows > 0):
+                                    while ($section = $filter_sections->fetch_assoc()):
                                 ?>
-                                    <option value="<?php echo $section['id']; ?>" <?php echo ($filters['section'] == $section['id']) ? 'selected' : ''; ?>>
-                                        <?php echo htmlspecialchars($section['name']); ?>
-                                    </option>
-                                <?php endwhile; ?>
+                                        <option value="<?php echo $section['id']; ?>" <?php echo ($filters['section'] == $section['id']) ? 'selected' : ''; ?>>
+                                            <?php echo htmlspecialchars($section['name']); ?>
+                                        </option>
+                                <?php
+                                    endwhile;
+                                endif;
+                                ?>
                             </select>
                         </div>
 
@@ -695,7 +699,7 @@ if (!empty($filters['department'])) {
 
             <div class="action-bar">
                 <div class="search-box">
-                    <input type="text" id="searchInput" placeholder="Search students...">
+                    <input type="text" id="searchInput" placeholder="Search students by name, ID, or parent...">
                     <i class="fas fa-search"></i>
                 </div>
                 <button class="add-btn" onclick="openAddModal()">
@@ -705,15 +709,19 @@ if (!empty($filters['department'])) {
             </div>
 
             <div class="table-container">
+                <h3>
+                    <i class="fas fa-users"></i>
+                    Student Records
+                </h3>
                 <table class="table">
                     <thead>
                         <tr>
                             <th>Student ID</th>
                             <th>Full Name</th>
-                            <th>Department</th>
-                            <th>Course</th>
-                            <th>Year & Section</th>
-                            <th>Email</th>
+                            <th>Grade & Section</th>
+                            <th>Gender</th>
+                            <th>Date of Birth</th>
+                            <th>Parent/Guardian</th>
                             <th>Contact</th>
                             <th>Actions</th>
                         </tr>
@@ -721,24 +729,37 @@ if (!empty($filters['department'])) {
                     <tbody id="studentsTable">
                         <?php if ($students->num_rows > 0): ?>
                             <?php while ($student = $students->fetch_assoc()): ?>
-                                <tr data-search="<?php echo strtolower($student['student_id'] . ' ' . $student['firstname'] . ' ' . $student['lastname'] . ' ' . $student['email'] . ' ' . $student['course_code'] . ' ' . $student['department_code']); ?>">
-                                    <td><?php echo htmlspecialchars($student['student_id']); ?></td>
-                                    <td><?php echo htmlspecialchars($student['firstname'] . ' ' . ($student['middlename'] ? substr($student['middlename'], 0, 1) . '. ' : '') . $student['lastname']); ?></td>
-                                    <td><?php echo htmlspecialchars($student['department_code']); ?></td>
-                                    <td><?php echo htmlspecialchars($student['course_code']); ?></td>
+                                <tr data-search="<?php echo strtolower($student['student_id'] . ' ' . $student['firstname'] . ' ' . $student['lastname'] . ' ' . $student['parent_name'] . ' ' . $student['grade_name'] . ' ' . $student['section_name']); ?>">
                                     <td>
-                                        <span class="year-section">
-                                            <?php echo htmlspecialchars($student['year_level'] . ' - ' . $student['section_name']); ?>
+                                        <span class="student-id-badge">
+                                            <i class="fas fa-id-card"></i>
+                                            <?php echo htmlspecialchars($student['student_id']); ?>
                                         </span>
                                     </td>
-                                    <td><?php echo htmlspecialchars($student['email']); ?></td>
-                                    <td><?php echo htmlspecialchars($student['contact'] ?: 'N/A'); ?></td>
+                                    <td>
+                                        <strong><?php echo htmlspecialchars($student['firstname'] . ' ' . ($student['middlename'] ? substr($student['middlename'], 0, 1) . '. ' : '') . $student['lastname']); ?></strong>
+                                    </td>
+                                    <td>
+                                        <span class="grade-section-badge">
+                                            <i class="fas fa-graduation-cap"></i>
+                                            <?php echo htmlspecialchars($student['grade_name'] . ' - ' . $student['section_name']); ?>
+                                        </span>
+                                    </td>
+                                    <td>
+                                        <span class="gender-badge gender-<?php echo strtolower($student['gender']); ?>">
+                                            <i class="fas fa-<?php echo $student['gender'] == 'Male' ? 'mars' : 'venus'; ?>"></i>
+                                            <?php echo htmlspecialchars($student['gender']); ?>
+                                        </span>
+                                    </td>
+                                    <td><?php echo $student['date_of_birth'] ? formatDate($student['date_of_birth']) : 'N/A'; ?></td>
+                                    <td><?php echo htmlspecialchars($student['parent_name'] ?: 'N/A'); ?></td>
+                                    <td><?php echo htmlspecialchars($student['parent_contact'] ?: 'N/A'); ?></td>
                                     <td>
                                         <div class="action-buttons">
-                                            <button class="btn-icon btn-edit" onclick="editStudent(<?php echo $student['id']; ?>)">
+                                            <button class="btn-icon btn-edit" onclick="editStudent(<?php echo $student['id']; ?>)" title="Edit Student">
                                                 <i class="fas fa-edit"></i>
                                             </button>
-                                            <button class="btn-icon btn-delete" onclick="deleteStudent(<?php echo $student['id']; ?>)">
+                                            <button class="btn-icon btn-delete" onclick="deleteStudent(<?php echo $student['id']; ?>)" title="Delete Student">
                                                 <i class="fas fa-trash"></i>
                                             </button>
                                         </div>
@@ -781,106 +802,84 @@ if (!empty($filters['department'])) {
 
                 <div class="form-grid">
                     <div class="form-group">
-                        <label>Student ID *</label>
-                        <input type="text" name="student_id" id="student_id" required>
-                    </div>
-
-                    <div class="form-group">
-                        <label>First Name *</label>
+                        <label><i class="fas fa-user"></i> First Name *</label>
                         <input type="text" name="firstname" id="firstname" required>
                     </div>
 
                     <div class="form-group">
-                        <label>Middle Name</label>
+                        <label><i class="fas fa-user"></i> Last Name *</label>
+                        <input type="text" name="lastname" id="lastname" required>
+                    </div>
+
+                    <div class="form-group">
+                        <label><i class="fas fa-user"></i> Middle Name</label>
                         <input type="text" name="middlename" id="middlename">
                     </div>
 
                     <div class="form-group">
-                        <label>Last Name *</label>
-                        <input type="text" name="lastname" id="lastname" required>
-                    </div>
-
-                    <div class="form-group full-width">
-                        <label>Email *</label>
-                        <input type="email" name="email" id="email" required>
+                        <label><i class="fas fa-venus-mars"></i> Gender *</label>
+                        <select name="gender" id="gender" required>
+                            <option value="">Select Gender</option>
+                            <option value="Male">Male</option>
+                            <option value="Female">Female</option>
+                        </select>
                     </div>
 
                     <div class="form-group">
-                        <label>Department *</label>
-                        <select name="department_id" id="department_id" required onchange="loadCourses()">
-                            <option value="">Select Department</option>
+                        <label><i class="fas fa-birthday-cake"></i> Date of Birth *</label>
+                        <input type="date" name="date_of_birth" id="date_of_birth" required max="<?php echo date('Y-m-d'); ?>">
+                    </div>
+
+                    <div class="form-group">
+                        <label><i class="fas fa-graduation-cap"></i> Grade Level *</label>
+                        <select name="grade_level_id" id="grade_level_id" required onchange="loadSections()">
+                            <option value="">Select Grade Level</option>
                             <?php
-                            $departments->data_seek(0);
-                            while ($dept = $departments->fetch_assoc()):
+                            $grade_levels->data_seek(0);
+                            while ($grade = $grade_levels->fetch_assoc()):
                             ?>
-                                <option value="<?php echo $dept['id']; ?>" <?php echo (!empty($filters['department']) && $filters['department'] == $dept['id']) ? 'selected' : ''; ?>>
-                                    <?php echo htmlspecialchars($dept['code'] . ' - ' . $dept['name']); ?>
+                                <option value="<?php echo $grade['id']; ?>">
+                                    <?php echo htmlspecialchars($grade['grade_name']); ?>
                                 </option>
                             <?php endwhile; ?>
                         </select>
                     </div>
 
                     <div class="form-group">
-                        <label>Course *</label>
-                        <select name="course_id" id="course_id" required>
-                            <option value="">Select Department First</option>
-                            <?php
-                            if (!empty($filters['department'])):
-                                $modal_courses_stmt = $conn->prepare("SELECT id, code, name FROM courses WHERE department_id = ? AND is_active = 1 ORDER BY name");
-                                $modal_courses_stmt->bind_param("i", $filters['department']);
-                                $modal_courses_stmt->execute();
-                                $modal_courses = $modal_courses_stmt->get_result();
-                                while ($course = $modal_courses->fetch_assoc()):
-                            ?>
-                                    <option value="<?php echo $course['id']; ?>" <?php echo (!empty($filters['course']) && $filters['course'] == $course['id']) ? 'selected' : ''; ?>>
-                                        <?php echo htmlspecialchars($course['code'] . ' - ' . $course['name']); ?>
-                                    </option>
-                            <?php
-                                endwhile;
-                            endif;
-                            ?>
-                        </select>
-                    </div>
-
-                    <div class="form-group">
-                        <label>Year Level *</label>
-                        <select name="year_level" id="year_level" required>
-                            <option value="">Select Year</option>
-                            <option value="1st Year" <?php echo (!empty($filters['year']) && $filters['year'] == '1st Year') ? 'selected' : ''; ?>>1st Year</option>
-                            <option value="2nd Year" <?php echo (!empty($filters['year']) && $filters['year'] == '2nd Year') ? 'selected' : ''; ?>>2nd Year</option>
-                            <option value="3rd Year" <?php echo (!empty($filters['year']) && $filters['year'] == '3rd Year') ? 'selected' : ''; ?>>3rd Year</option>
-                            <option value="4th Year" <?php echo (!empty($filters['year']) && $filters['year'] == '4th Year') ? 'selected' : ''; ?>>4th Year</option>
-                        </select>
-                    </div>
-
-                    <div class="form-group">
-                        <label>Section *</label>
+                        <label><i class="fas fa-users"></i> Section *</label>
                         <select name="section_id" id="section_id" required>
-                            <option value="">Select Section</option>
-                            <?php
-                            $sections->data_seek(0);
-                            while ($section = $sections->fetch_assoc()):
-                            ?>
-                                <option value="<?php echo $section['id']; ?>" <?php echo (!empty($filters['section']) && $filters['section'] == $section['id']) ? 'selected' : ''; ?>>
-                                    <?php echo htmlspecialchars($section['name']); ?>
-                                </option>
-                            <?php endwhile; ?>
+                            <option value="">Select Grade First</option>
                         </select>
                     </div>
 
                     <div class="form-group full-width">
-                        <label>Contact Number</label>
-                        <input type="text" name="contact" id="contact">
+                        <label><i class="fas fa-user-friends"></i> Parent/Guardian Name</label>
+                        <input type="text" name="parent_name" id="parent_name">
                     </div>
-                </div>
 
-                <div class="form-actions">
-                    <button type="submit" class="btn-submit">
-                        <i class="fas fa-save"></i> Save Student
-                    </button>
-                    <button type="button" class="btn-cancel" onclick="closeModal()">
-                        <i class="fas fa-times"></i> Cancel
-                    </button>
+                    <div class="form-group">
+                        <label><i class="fas fa-phone"></i> Parent Contact Number</label>
+                        <input type="text" name="parent_contact" id="parent_contact" placeholder="e.g., 09123456789">
+                    </div>
+
+                    <div class="form-group">
+                        <label><i class="fas fa-envelope"></i> Parent Email</label>
+                        <input type="email" name="parent_email" id="parent_email" placeholder="parent@example.com">
+                    </div>
+
+                    <div class="form-group full-width">
+                        <label><i class="fas fa-map-marker-alt"></i> Complete Address</label>
+                        <textarea name="address" id="address" rows="3"></textarea>
+                    </div>
+
+                    <div class="form-actions">
+                        <button type="submit" class="btn-submit">
+                            <i class="fas fa-save"></i> Save Student
+                        </button>
+                        <button type="button" class="btn-cancel" onclick="closeModal()">
+                            <i class="fas fa-times"></i> Cancel
+                        </button>
+                    </div>
                 </div>
             </form>
         </div>
@@ -911,19 +910,19 @@ if (!empty($filters['department'])) {
             }, 3000);
         }
 
-        function loadCourses() {
-            const departmentId = document.getElementById('department_id').value;
-            const courseSelect = document.getElementById('course_id');
+        function loadSections() {
+            const gradeId = document.getElementById('grade_level_id').value;
+            const sectionSelect = document.getElementById('section_id');
 
-            if (!departmentId) {
-                courseSelect.innerHTML = '<option value="">Select Department First</option>';
+            if (!gradeId) {
+                sectionSelect.innerHTML = '<option value="">Select Grade First</option>';
                 return Promise.resolve();
             }
 
             const formData = new FormData();
             formData.append('ajax', '1');
-            formData.append('action', 'get_courses');
-            formData.append('department_id', departmentId);
+            formData.append('action', 'get_sections');
+            formData.append('grade_id', gradeId);
 
             return fetch('students.php', {
                     method: 'POST',
@@ -932,31 +931,35 @@ if (!empty($filters['department'])) {
                 .then(response => response.json())
                 .then(data => {
                     if (data.success) {
-                        courseSelect.innerHTML = '<option value="">Select Course</option>';
-                        data.data.forEach(course => {
+                        sectionSelect.innerHTML = '<option value="">Select Section</option>';
+                        data.data.forEach(section => {
                             const option = document.createElement('option');
-                            option.value = course.id;
-                            option.textContent = `${course.code} - ${course.name}`;
-                            courseSelect.appendChild(option);
+                            option.value = section.id;
+                            option.textContent = `${section.name}${section.room_number ? ' (Room ' + section.room_number + ')' : ''}`;
+                            sectionSelect.appendChild(option);
                         });
                     }
+                })
+                .catch(error => {
+                    console.error('Error loading sections:', error);
+                    showMessage('error', 'Failed to load sections');
                 });
         }
 
-        function loadQuickCourses() {
-            const departmentId = document.getElementById('quick_department').value;
-            const courseSelect = document.getElementById('quick_course');
-            const currentCourseValue = courseSelect.value;
+        function loadQuickSections() {
+            const gradeId = document.getElementById('quick_grade').value;
+            const sectionSelect = document.getElementById('quick_section');
+            const currentSectionValue = sectionSelect.value;
 
-            if (!departmentId) {
-                courseSelect.innerHTML = '<option value="">All Courses</option>';
+            if (!gradeId) {
+                sectionSelect.innerHTML = '<option value="">All Sections</option>';
                 return;
             }
 
             const formData = new FormData();
             formData.append('ajax', '1');
-            formData.append('action', 'get_courses');
-            formData.append('department_id', departmentId);
+            formData.append('action', 'get_sections');
+            formData.append('grade_id', gradeId);
 
             fetch('students.php', {
                     method: 'POST',
@@ -965,45 +968,47 @@ if (!empty($filters['department'])) {
                 .then(response => response.json())
                 .then(data => {
                     if (data.success) {
-                        courseSelect.innerHTML = '<option value="">All Courses</option>';
-                        data.data.forEach(course => {
+                        sectionSelect.innerHTML = '<option value="">All Sections</option>';
+                        data.data.forEach(section => {
                             const option = document.createElement('option');
-                            option.value = course.id;
-                            option.textContent = `${course.code} - ${course.name}`;
-                            if (course.id == currentCourseValue) {
+                            option.value = section.id;
+                            option.textContent = section.name;
+                            if (section.id == currentSectionValue) {
                                 option.selected = true;
                             }
-                            courseSelect.appendChild(option);
+                            sectionSelect.appendChild(option);
                         });
                     }
+                })
+                .catch(error => {
+                    console.error('Error loading sections:', error);
+                    showMessage('error', 'Failed to load sections');
                 });
         }
 
         function clearFilters() {
-            document.getElementById('quick_department').value = '';
-            document.getElementById('quick_course').innerHTML = '<option value="">All Courses</option>';
-            document.getElementById('quick_year').value = '';
-            document.getElementById('quick_section').value = '';
+            document.getElementById('quick_grade').value = '';
+            document.getElementById('quick_section').innerHTML = '<option value="">All Sections</option>';
             document.getElementById('filterForm').submit();
         }
 
         function openAddModal() {
             document.getElementById('modalTitle').textContent = 'Add Student';
             document.getElementById('formAction').value = 'add';
-
-
-            document.getElementById('student_id').value = '';
-            document.getElementById('firstname').value = '';
-            document.getElementById('middlename').value = '';
-            document.getElementById('lastname').value = '';
-            document.getElementById('email').value = '';
-            document.getElementById('contact').value = '';
             document.getElementById('studentId').value = '';
 
-            const deptValue = document.getElementById('department_id').value;
-            if (deptValue && document.getElementById('course_id').options.length <= 1) {
-                loadCourses();
-            }
+            // Clear all form fields
+            document.getElementById('firstname').value = '';
+            document.getElementById('lastname').value = '';
+            document.getElementById('middlename').value = '';
+            document.getElementById('gender').value = '';
+            document.getElementById('date_of_birth').value = '';
+            document.getElementById('grade_level_id').value = '';
+            document.getElementById('section_id').innerHTML = '<option value="">Select Grade First</option>';
+            document.getElementById('parent_name').value = '';
+            document.getElementById('parent_contact').value = '';
+            document.getElementById('parent_email').value = '';
+            document.getElementById('address').value = '';
 
             document.getElementById('studentModal').classList.add('active');
         }
@@ -1030,18 +1035,20 @@ if (!empty($filters['department'])) {
                         document.getElementById('modalTitle').textContent = 'Edit Student';
                         document.getElementById('formAction').value = 'edit';
                         document.getElementById('studentId').value = student.id;
-                        document.getElementById('student_id').value = student.student_id;
                         document.getElementById('firstname').value = student.firstname;
-                        document.getElementById('middlename').value = student.middlename || '';
                         document.getElementById('lastname').value = student.lastname;
-                        document.getElementById('email').value = student.email;
-                        document.getElementById('department_id').value = student.department_id;
-                        document.getElementById('year_level').value = student.year_level;
-                        document.getElementById('section_id').value = student.section_id;
-                        document.getElementById('contact').value = student.contact || '';
+                        document.getElementById('middlename').value = student.middlename || '';
+                        document.getElementById('gender').value = student.gender;
+                        document.getElementById('date_of_birth').value = student.date_of_birth || '';
+                        document.getElementById('grade_level_id').value = student.grade_level_id;
+                        document.getElementById('parent_name').value = student.parent_name || '';
+                        document.getElementById('parent_contact').value = student.parent_contact || '';
+                        document.getElementById('parent_email').value = student.parent_email || '';
+                        document.getElementById('address').value = student.address || '';
 
-                        loadCourses().then(() => {
-                            document.getElementById('course_id').value = student.course_id;
+                        // Load sections then set the value
+                        loadSections().then(() => {
+                            document.getElementById('section_id').value = student.section_id;
                         });
 
                         document.getElementById('studentModal').classList.add('active');
@@ -1056,7 +1063,7 @@ if (!empty($filters['department'])) {
         }
 
         function deleteStudent(id) {
-            if (!confirm('Are you sure you want to delete this student?')) {
+            if (!confirm('Are you sure you want to delete this student? This action cannot be undone.')) {
                 return;
             }
 
@@ -1082,6 +1089,7 @@ if (!empty($filters['department'])) {
                 });
         }
 
+        // Form submission
         document.getElementById('studentForm').addEventListener('submit', function(e) {
             e.preventDefault();
 
@@ -1105,6 +1113,7 @@ if (!empty($filters['department'])) {
                 });
         });
 
+        // Search functionality
         document.getElementById('searchInput').addEventListener('input', function(e) {
             const searchTerm = e.target.value.toLowerCase();
             const rows = document.querySelectorAll('#studentsTable tr');
@@ -1121,28 +1130,31 @@ if (!empty($filters['department'])) {
             });
         });
 
+        // Close modal on outside click
         document.getElementById('studentModal').addEventListener('click', function(e) {
             if (e.target === this) {
                 closeModal();
             }
         });
 
+        // Close modal on escape key
         document.addEventListener('keydown', function(e) {
             if (e.key === 'Escape') {
                 closeModal();
             }
         });
 
+        // Load sections on page load if grade is selected
         window.addEventListener('DOMContentLoaded', function() {
-            const selectedDept = document.getElementById('quick_department').value;
-            const selectedCourse = '<?php echo $filters['course']; ?>';
+            const selectedGrade = document.getElementById('quick_grade').value;
+            const selectedSection = '<?php echo $filters['section']; ?>';
 
-            if (selectedDept && selectedCourse) {
-                const courseSelect = document.getElementById('quick_course');
-                const currentOption = courseSelect.querySelector(`option[value="${selectedCourse}"]`);
+            if (selectedGrade && selectedSection) {
+                const sectionSelect = document.getElementById('quick_section');
+                const currentOption = sectionSelect.querySelector(`option[value="${selectedSection}"]`);
 
                 if (!currentOption || currentOption.value === '') {
-                    loadQuickCourses();
+                    loadQuickSections();
                 }
             }
         });
@@ -1150,3 +1162,6 @@ if (!empty($filters['department'])) {
 </body>
 
 </html>
+<?php
+$conn->close();
+?>
