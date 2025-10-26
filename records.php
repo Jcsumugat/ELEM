@@ -6,77 +6,77 @@ $conn = getDBConnection();
 
 // Handle AJAX requests
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['ajax'])) {
+    ob_clean();
     $action = $_POST['action'] ?? '';
-    
+
+    if ($action === 'get_sections') {
+        $grade_id = (int)$_POST['grade_id'];
+        $stmt = $conn->prepare("SELECT id, name FROM sections WHERE grade_level_id = ? AND is_active = 1 ORDER BY name");
+        $stmt->bind_param("i", $grade_id);
+        $stmt->execute();
+        $result = $stmt->get_result();
+
+        $sections = [];
+        while ($row = $result->fetch_assoc()) {
+            $sections[] = $row;
+        }
+        jsonResponse(true, 'Sections found', $sections);
+        exit;
+    }
+
     if ($action === 'get_records') {
         $date_from = sanitizeInput($_POST['date_from'] ?? '');
         $date_to = sanitizeInput($_POST['date_to'] ?? '');
-        $department_id = (int)($_POST['department_id'] ?? 0);
-        $course_id = (int)($_POST['course_id'] ?? 0);
-        $year_level = sanitizeInput($_POST['year_level'] ?? '');
+        $grade_level_id = (int)($_POST['grade_level_id'] ?? 0);
         $section_id = (int)($_POST['section_id'] ?? 0);
         $status = sanitizeInput($_POST['status'] ?? '');
         $search = sanitizeInput($_POST['search'] ?? '');
-        
+
         $query = "SELECT 
             a.id,
             a.attendance_date,
             a.time_in,
+            a.time_out,
             a.status,
             a.remarks,
             s.student_id,
             CONCAT(s.firstname, ' ', COALESCE(CONCAT(LEFT(s.middlename, 1), '. '), ''), s.lastname) as student_name,
-            d.code as department_code,
-            c.code as course_code,
-            s.year_level,
+            gl.grade_name,
             sec.name as section_name
             FROM attendance a
             JOIN students s ON a.student_id = s.id
-            LEFT JOIN departments d ON s.department_id = d.id
-            LEFT JOIN courses c ON s.course_id = c.id
+            LEFT JOIN grade_levels gl ON s.grade_level_id = gl.id
             LEFT JOIN sections sec ON s.section_id = sec.id
             WHERE 1=1";
-        
+
         $params = [];
         $types = "";
-        
+
         if ($date_from && $date_to) {
             $query .= " AND a.attendance_date BETWEEN ? AND ?";
             $params[] = $date_from;
             $params[] = $date_to;
             $types .= "ss";
         }
-        
-        if ($department_id > 0) {
-            $query .= " AND s.department_id = ?";
-            $params[] = $department_id;
+
+        if ($grade_level_id > 0) {
+            $query .= " AND s.grade_level_id = ?";
+            $params[] = $grade_level_id;
             $types .= "i";
         }
-        
-        if ($course_id > 0) {
-            $query .= " AND s.course_id = ?";
-            $params[] = $course_id;
-            $types .= "i";
-        }
-        
-        if ($year_level) {
-            $query .= " AND s.year_level = ?";
-            $params[] = $year_level;
-            $types .= "s";
-        }
-        
+
         if ($section_id > 0) {
             $query .= " AND s.section_id = ?";
             $params[] = $section_id;
             $types .= "i";
         }
-        
+
         if ($status) {
             $query .= " AND a.status = ?";
             $params[] = $status;
             $types .= "s";
         }
-        
+
         if ($search) {
             $query .= " AND (s.student_id LIKE ? OR s.firstname LIKE ? OR s.lastname LIKE ?)";
             $searchParam = "%{$search}%";
@@ -85,172 +85,192 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['ajax'])) {
             $params[] = $searchParam;
             $types .= "sss";
         }
-        
+
         $query .= " ORDER BY a.attendance_date DESC, s.lastname, s.firstname";
-        
+
         $stmt = $conn->prepare($query);
         if (!empty($params)) {
             $stmt->bind_param($types, ...$params);
         }
         $stmt->execute();
         $result = $stmt->get_result();
-        
+
         $records = [];
         while ($row = $result->fetch_assoc()) {
             $records[] = $row;
         }
-        
+
         jsonResponse(true, 'Records loaded', $records);
+        exit;
     }
-    
+
     if ($action === 'update_record') {
         $id = (int)$_POST['id'];
         $status = sanitizeInput($_POST['status']);
         $time_in = sanitizeInput($_POST['time_in']);
+        $time_out = sanitizeInput($_POST['time_out']);
         $remarks = sanitizeInput($_POST['remarks']);
-        
-        $stmt = $conn->prepare("UPDATE attendance SET status = ?, time_in = ?, remarks = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?");
-        $stmt->bind_param("sssi", $status, $time_in, $remarks, $id);
-        
+
+        // Validate status
+        if (!in_array($status, ['Present', 'Late', 'Absent', 'Excused'])) {
+            jsonResponse(false, 'Invalid status');
+            exit;
+        }
+
+        // If absent, clear time_in and time_out
+        if ($status === 'Absent') {
+            $time_in = null;
+            $time_out = null;
+        } else {
+            if (!empty($time_in)) {
+                $time_in = date('H:i:s', strtotime($time_in));
+            } else {
+                $time_in = null;
+            }
+
+            if (!empty($time_out)) {
+                $time_out = date('H:i:s', strtotime($time_out));
+            } else {
+                $time_out = null;
+            }
+        }
+
+        if ($time_in !== null && $time_out !== null) {
+            $stmt = $conn->prepare("UPDATE attendance SET status = ?, time_in = ?, time_out = ?, remarks = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?");
+            $stmt->bind_param("ssssi", $status, $time_in, $time_out, $remarks, $id);
+        } elseif ($time_in !== null) {
+            $stmt = $conn->prepare("UPDATE attendance SET status = ?, time_in = ?, time_out = NULL, remarks = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?");
+            $stmt->bind_param("sssi", $status, $time_in, $remarks, $id);
+        } else {
+            $stmt = $conn->prepare("UPDATE attendance SET status = ?, time_in = NULL, time_out = NULL, remarks = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?");
+            $stmt->bind_param("ssi", $status, $remarks, $id);
+        }
+
         if ($stmt->execute()) {
+            logActivity($conn, $_SESSION['user_id'], 'Update Attendance', "Updated attendance record ID: $id");
             jsonResponse(true, 'Record updated successfully');
         } else {
             jsonResponse(false, 'Failed to update record');
         }
+        exit;
     }
-    
+
     if ($action === 'delete_record') {
         $id = (int)$_POST['id'];
-        
+
         $stmt = $conn->prepare("DELETE FROM attendance WHERE id = ?");
         $stmt->bind_param("i", $id);
-        
+
         if ($stmt->execute()) {
+            logActivity($conn, $_SESSION['user_id'], 'Delete Attendance', "Deleted attendance record ID: $id");
             jsonResponse(true, 'Record deleted successfully');
         } else {
             jsonResponse(false, 'Failed to delete record');
         }
+        exit;
     }
-    
+
     if ($action === 'get_record') {
         $id = (int)$_POST['id'];
-        
+
         $stmt = $conn->prepare("SELECT * FROM attendance WHERE id = ?");
         $stmt->bind_param("i", $id);
         $stmt->execute();
         $result = $stmt->get_result();
         $record = $result->fetch_assoc();
-        
+
         if ($record) {
             jsonResponse(true, 'Record found', $record);
         } else {
             jsonResponse(false, 'Record not found');
         }
+        exit;
     }
-    
+
     if ($action === 'export_csv') {
         $date_from = sanitizeInput($_POST['date_from'] ?? '');
         $date_to = sanitizeInput($_POST['date_to'] ?? '');
-        $department_id = (int)($_POST['department_id'] ?? 0);
-        $course_id = (int)($_POST['course_id'] ?? 0);
-        $year_level = sanitizeInput($_POST['year_level'] ?? '');
+        $grade_level_id = (int)($_POST['grade_level_id'] ?? 0);
         $section_id = (int)($_POST['section_id'] ?? 0);
         $status = sanitizeInput($_POST['status'] ?? '');
-        
+
         $query = "SELECT 
             a.attendance_date as 'Date',
             s.student_id as 'Student ID',
             CONCAT(s.firstname, ' ', COALESCE(CONCAT(LEFT(s.middlename, 1), '. '), ''), s.lastname) as 'Student Name',
-            d.code as 'Department',
-            c.code as 'Course',
-            s.year_level as 'Year Level',
+            gl.grade_name as 'Grade Level',
             sec.name as 'Section',
             a.status as 'Status',
             a.time_in as 'Time In',
+            a.time_out as 'Time Out',
             a.remarks as 'Remarks'
             FROM attendance a
             JOIN students s ON a.student_id = s.id
-            LEFT JOIN departments d ON s.department_id = d.id
-            LEFT JOIN courses c ON s.course_id = c.id
+            LEFT JOIN grade_levels gl ON s.grade_level_id = gl.id
             LEFT JOIN sections sec ON s.section_id = sec.id
             WHERE 1=1";
-        
+
         $params = [];
         $types = "";
-        
+
         if ($date_from && $date_to) {
             $query .= " AND a.attendance_date BETWEEN ? AND ?";
             $params[] = $date_from;
             $params[] = $date_to;
             $types .= "ss";
         }
-        
-        if ($department_id > 0) {
-            $query .= " AND s.department_id = ?";
-            $params[] = $department_id;
+
+        if ($grade_level_id > 0) {
+            $query .= " AND s.grade_level_id = ?";
+            $params[] = $grade_level_id;
             $types .= "i";
         }
-        
-        if ($course_id > 0) {
-            $query .= " AND s.course_id = ?";
-            $params[] = $course_id;
-            $types .= "i";
-        }
-        
-        if ($year_level) {
-            $query .= " AND s.year_level = ?";
-            $params[] = $year_level;
-            $types .= "s";
-        }
-        
+
         if ($section_id > 0) {
             $query .= " AND s.section_id = ?";
             $params[] = $section_id;
             $types .= "i";
         }
-        
+
         if ($status) {
             $query .= " AND a.status = ?";
             $params[] = $status;
             $types .= "s";
         }
-        
+
         $query .= " ORDER BY a.attendance_date DESC, s.lastname, s.firstname";
-        
+
         $stmt = $conn->prepare($query);
         if (!empty($params)) {
             $stmt->bind_param($types, ...$params);
         }
         $stmt->execute();
         $result = $stmt->get_result();
-        
+
         // Set headers for CSV download
         header('Content-Type: text/csv');
         header('Content-Disposition: attachment; filename="attendance_records_' . date('Y-m-d') . '.csv"');
-        
+
         $output = fopen('php://output', 'w');
-        
+
         // Add headers
         $firstRow = $result->fetch_assoc();
         if ($firstRow) {
             fputcsv($output, array_keys($firstRow));
             fputcsv($output, $firstRow);
-            
+
             while ($row = $result->fetch_assoc()) {
                 fputcsv($output, $row);
             }
         }
-        
+
         fclose($output);
         exit;
     }
 }
 
-// Get departments for dropdown
-$departments = $conn->query("SELECT id, code, name FROM departments WHERE is_active = 1 ORDER BY name");
-
-// Get sections for dropdown
-$sections = $conn->query("SELECT id, name FROM sections WHERE is_active = 1 ORDER BY name");
+// Get grade levels for dropdown
+$grade_levels = $conn->query("SELECT id, grade_number, grade_name FROM grade_levels WHERE is_active = 1 ORDER BY grade_number");
 
 // Get statistics
 $today = date('Y-m-d');
@@ -265,13 +285,14 @@ $stats['month_records'] = $conn->query("SELECT COUNT(*) as count FROM attendance
 ?>
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Attendance Records - Attendance System</title>
+    <title>Attendance Records - Elementary Attendance System</title>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
-    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="dashboard.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="elementary_dashboard.css">
     <style>
         .stats-row {
             display: grid;
@@ -282,42 +303,65 @@ $stats['month_records'] = $conn->query("SELECT COUNT(*) as count FROM attendance
 
         .stat-box {
             background: var(--card-bg);
-            border: 1px solid rgba(157, 78, 221, 0.3);
-            border-radius: 12px;
+            border-radius: 20px;
             padding: 20px;
             display: flex;
             align-items: center;
             gap: 15px;
+            box-shadow: var(--shadow);
+            transition: all 0.3s ease;
+        }
+
+        .stat-box:hover {
+            transform: translateY(-5px);
+            box-shadow: var(--shadow-md);
+        }
+
+        .stat-box:nth-child(1) {
+            border: 3px solid var(--accent-green);
+        }
+
+        .stat-box:nth-child(2) {
+            border: 3px solid var(--accent-yellow);
+        }
+
+        .stat-box:nth-child(3) {
+            border: 3px solid var(--accent-pink);
+        }
+
+        .stat-box:nth-child(4) {
+            border: 3px solid var(--primary-blue);
         }
 
         .stat-icon {
             width: 50px;
             height: 50px;
-            border-radius: 10px;
+            border-radius: 15px;
             display: flex;
             align-items: center;
             justify-content: center;
             font-size: 1.5rem;
+            box-shadow: var(--shadow);
         }
 
         .stat-icon.present {
-            background: rgba(0, 208, 132, 0.1);
-            color: var(--success);
-        }
-
-        .stat-icon.absent {
-            background: rgba(255, 71, 87, 0.1);
-            color: var(--error);
+            background: linear-gradient(135deg, var(--accent-green), var(--primary-teal));
+            color: white;
         }
 
         .stat-icon.late {
-            background: rgba(255, 193, 7, 0.1);
-            color: var(--warning);
+            background: linear-gradient(135deg, var(--accent-yellow), var(--accent-orange));
+            color: white;
+        }
+
+        .stat-icon.absent {
+            background: linear-gradient(135deg, var(--accent-pink), var(--accent-purple));
+            color: white;
         }
 
         .stat-icon.total {
-            background: rgba(74, 144, 226, 0.1);
-            color: var(--primary-blue);
+            background: linear-gradient(135deg, var(--primary-blue), var(--primary-teal));
+            color: white;
         }
 
         .stat-info h4 {
@@ -328,7 +372,7 @@ $stats['month_records'] = $conn->query("SELECT COUNT(*) as count FROM attendance
         }
 
         .stat-info p {
-            color: var(--text-light);
+            color: var(--text-primary);
             font-size: 1.5rem;
             font-weight: 700;
             margin: 0;
@@ -336,10 +380,22 @@ $stats['month_records'] = $conn->query("SELECT COUNT(*) as count FROM attendance
 
         .filter-section {
             background: var(--card-bg);
-            border: 1px solid rgba(157, 78, 221, 0.3);
-            border-radius: 15px;
+            border-radius: 20px;
             padding: 25px;
             margin-bottom: 25px;
+            box-shadow: var(--shadow);
+            border: 3px dashed var(--accent-yellow);
+            position: relative;
+        }
+
+        .filter-section::before {
+            content: '';
+            position: absolute;
+            top: -15px;
+            left: 30px;
+            font-size: 2rem;
+            background: white;
+            padding: 0 10px;
         }
 
         .filter-header {
@@ -350,11 +406,12 @@ $stats['month_records'] = $conn->query("SELECT COUNT(*) as count FROM attendance
         }
 
         .filter-title {
-            color: var(--text-light);
+            color: var(--text-primary);
             display: flex;
             align-items: center;
             gap: 10px;
             font-size: 1.1rem;
+            font-weight: 700;
         }
 
         .filter-grid {
@@ -373,28 +430,27 @@ $stats['month_records'] = $conn->query("SELECT COUNT(*) as count FROM attendance
         .filter-group label {
             color: var(--text-secondary);
             font-size: 0.85rem;
-            font-weight: 500;
+            font-weight: 600;
         }
 
         .filter-group select,
         .filter-group input {
             padding: 10px 12px;
-            background: rgba(255, 255, 255, 0.05);
-            border: 2px solid rgba(157, 78, 221, 0.3);
-            border-radius: 8px;
-            color: var(--text-light);
+            background: var(--hover-bg);
+            border: 2px solid var(--border-color);
+            border-radius: 10px;
+            color: var(--text-primary);
             font-size: 0.9rem;
-        }
-
-        .filter-group select option {
-            background: var(--card-bg);
-            color: var(--text-light);
+            font-family: 'Inter', sans-serif;
+            transition: all 0.3s ease;
         }
 
         .filter-group select:focus,
         .filter-group input:focus {
             outline: none;
-            border-color: var(--accent-green);
+            border-color: var(--accent-purple);
+            background: white;
+            box-shadow: 0 0 0 4px rgba(181, 101, 216, 0.1);
         }
 
         .filter-actions {
@@ -405,29 +461,30 @@ $stats['month_records'] = $conn->query("SELECT COUNT(*) as count FROM attendance
 
         .btn-filter {
             padding: 10px 20px;
-            background: linear-gradient(135deg, var(--primary-blue), var(--primary-blue-dark));
+            background: linear-gradient(135deg, var(--primary-blue), var(--primary-teal));
             color: white;
             border: none;
-            border-radius: 8px;
+            border-radius: 10px;
             cursor: pointer;
             font-weight: 600;
             display: flex;
             align-items: center;
             gap: 8px;
             transition: all 0.3s ease;
+            box-shadow: var(--shadow);
         }
 
         .btn-filter:hover {
             transform: translateY(-2px);
-            box-shadow: 0 8px 20px rgba(74, 144, 226, 0.3);
+            box-shadow: var(--shadow-md);
         }
 
         .btn-reset {
             padding: 10px 20px;
-            background: rgba(255, 255, 255, 0.05);
-            color: var(--text-light);
-            border: 2px solid rgba(157, 78, 221, 0.3);
-            border-radius: 8px;
+            background: white;
+            color: var(--danger);
+            border: 2px solid var(--danger);
+            border-radius: 10px;
             cursor: pointer;
             font-weight: 600;
             display: flex;
@@ -437,15 +494,16 @@ $stats['month_records'] = $conn->query("SELECT COUNT(*) as count FROM attendance
         }
 
         .btn-reset:hover {
-            border-color: var(--accent-green);
+            background: var(--danger);
+            color: white;
         }
 
         .btn-export {
             padding: 10px 20px;
-            background: linear-gradient(135deg, var(--accent-green), #00a86b);
+            background: linear-gradient(135deg, var(--accent-green), var(--primary-teal));
             color: white;
             border: none;
-            border-radius: 8px;
+            border-radius: 10px;
             cursor: pointer;
             font-weight: 600;
             display: flex;
@@ -453,18 +511,20 @@ $stats['month_records'] = $conn->query("SELECT COUNT(*) as count FROM attendance
             gap: 8px;
             transition: all 0.3s ease;
             margin-left: auto;
+            box-shadow: var(--shadow);
         }
 
         .btn-export:hover {
             transform: translateY(-2px);
-            box-shadow: 0 8px 20px rgba(0, 208, 132, 0.3);
+            box-shadow: var(--shadow-md);
         }
 
         .records-section {
             background: var(--card-bg);
-            border: 1px solid rgba(157, 78, 221, 0.3);
-            border-radius: 15px;
+            border-radius: 20px;
             padding: 25px;
+            box-shadow: var(--shadow);
+            border: 3px solid var(--accent-green);
         }
 
         .section-header {
@@ -475,11 +535,12 @@ $stats['month_records'] = $conn->query("SELECT COUNT(*) as count FROM attendance
         }
 
         .section-title {
-            color: var(--text-light);
+            color: var(--text-primary);
             display: flex;
             align-items: center;
             gap: 10px;
             font-size: 1.1rem;
+            font-weight: 700;
         }
 
         .search-box {
@@ -490,16 +551,20 @@ $stats['month_records'] = $conn->query("SELECT COUNT(*) as count FROM attendance
         .search-box input {
             width: 100%;
             padding: 10px 40px 10px 15px;
-            background: rgba(255, 255, 255, 0.05);
-            border: 2px solid rgba(157, 78, 221, 0.3);
-            border-radius: 8px;
-            color: var(--text-light);
+            background: var(--hover-bg);
+            border: 2px solid var(--border-color);
+            border-radius: 10px;
+            color: var(--text-primary);
             font-size: 0.9rem;
+            font-family: 'Inter', sans-serif;
+            transition: all 0.3s ease;
         }
 
         .search-box input:focus {
             outline: none;
-            border-color: var(--accent-green);
+            border-color: var(--accent-purple);
+            background: white;
+            box-shadow: 0 0 0 4px rgba(181, 101, 216, 0.1);
         }
 
         .search-box i {
@@ -512,14 +577,18 @@ $stats['month_records'] = $conn->query("SELECT COUNT(*) as count FROM attendance
 
         .records-table {
             width: 100%;
-            border-collapse: collapse;
+            border-collapse: separate;
+            border-spacing: 0 8px;
             margin-top: 15px;
         }
 
+        .records-table thead tr {
+            background: linear-gradient(135deg, var(--primary-blue), var(--primary-teal));
+            color: white;
+        }
+
         .records-table thead th {
-            background: rgba(157, 78, 221, 0.1);
-            color: var(--text-secondary);
-            padding: 12px;
+            padding: 14px 16px;
             text-align: left;
             font-weight: 600;
             font-size: 0.85rem;
@@ -527,77 +596,120 @@ $stats['month_records'] = $conn->query("SELECT COUNT(*) as count FROM attendance
             letter-spacing: 0.5px;
         }
 
-        .records-table tbody td {
-            padding: 12px;
-            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
-            color: var(--text-light);
-            font-size: 0.9rem;
+        .records-table thead th:first-child {
+            border-top-left-radius: 12px;
+            border-bottom-left-radius: 12px;
+        }
+
+        .records-table thead th:last-child {
+            border-top-right-radius: 12px;
+            border-bottom-right-radius: 12px;
+        }
+
+        .records-table tbody tr {
+            background: var(--hover-bg);
+            transition: all 0.3s ease;
         }
 
         .records-table tbody tr:hover {
-            background: rgba(157, 78, 221, 0.05);
+            background: white;
+            box-shadow: var(--shadow);
+            transform: scale(1.01);
+        }
+
+        .records-table tbody td {
+            padding: 14px 16px;
+            color: var(--text-primary);
+            font-weight: 500;
+            font-size: 0.85rem;
+        }
+
+        .records-table tbody td:first-child {
+            border-top-left-radius: 12px;
+            border-bottom-left-radius: 12px;
+        }
+
+        .records-table tbody td:last-child {
+            border-top-right-radius: 12px;
+            border-bottom-right-radius: 12px;
         }
 
         .status-badge {
-            padding: 5px 12px;
-            border-radius: 6px;
-            font-weight: 600;
-            font-size: 0.8rem;
+            padding: 6px 14px;
+            border-radius: 20px;
+            font-weight: 700;
+            font-size: 0.75rem;
             display: inline-block;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
         }
 
         .status-badge.status-present {
-            background: rgba(0, 208, 132, 0.1);
-            color: var(--success);
-            border: 1px solid var(--success);
+            background: linear-gradient(135deg, var(--accent-green), var(--primary-teal));
+            color: white;
+            box-shadow: 0 2px 8px rgba(123, 201, 111, 0.3);
         }
 
         .status-badge.status-late {
-            background: rgba(255, 193, 7, 0.1);
-            color: var(--warning);
-            border: 1px solid var(--warning);
+            background: linear-gradient(135deg, var(--accent-yellow), var(--accent-orange));
+            color: white;
+            box-shadow: 0 2px 8px rgba(255, 199, 95, 0.3);
         }
 
         .status-badge.status-absent {
-            background: rgba(255, 71, 87, 0.1);
-            color: var(--error);
-            border: 1px solid var(--error);
+            background: linear-gradient(135deg, var(--accent-pink), var(--accent-purple));
+            color: white;
+            box-shadow: 0 2px 8px rgba(255, 111, 145, 0.3);
+        }
+
+        .status-badge.status-excused {
+            background: linear-gradient(135deg, var(--primary-blue), var(--accent-purple));
+            color: white;
+            box-shadow: 0 2px 8px rgba(74, 144, 226, 0.3);
         }
 
         .action-buttons {
             display: flex;
             gap: 8px;
+            justify-content: center;
         }
 
         .btn-icon {
             padding: 6px 10px;
             border: none;
-            border-radius: 6px;
+            border-radius: 8px;
             cursor: pointer;
             transition: all 0.3s ease;
             font-size: 0.85rem;
+            display: flex;
+            align-items: center;
+            gap: 4px;
         }
 
         .btn-edit {
             background: rgba(74, 144, 226, 0.1);
             color: var(--primary-blue);
-            border: 1px solid var(--primary-blue);
+            border: 2px solid var(--primary-blue);
         }
 
         .btn-edit:hover {
             background: var(--primary-blue);
             color: white;
+            transform: translateY(-2px);
+            box-shadow: var(--shadow);
         }
 
         .btn-delete {
-            background: rgba(255, 71, 87, 0.1);
-            color: var(--error);
-            border: 1px solid var(--error);
+            background: rgba(239, 68, 68, 0.1);
+            color: var(--danger);
+            border: 2px solid var(--danger);
         }
 
         .btn-delete:hover {
-            background: var(--error);
+            background: var(--danger);
             color: white;
+            transform: translateY(-2px);
+            box-shadow: var(--shadow);
         }
 
         .loading {
@@ -609,11 +721,17 @@ $stats['month_records'] = $conn->query("SELECT COUNT(*) as count FROM attendance
         .loading i {
             font-size: 2rem;
             animation: spin 1s linear infinite;
+            color: var(--primary-blue);
         }
 
         @keyframes spin {
-            from { transform: rotate(0deg); }
-            to { transform: rotate(360deg); }
+            from {
+                transform: rotate(0deg);
+            }
+
+            to {
+                transform: rotate(360deg);
+            }
         }
 
         .empty-state {
@@ -626,6 +744,17 @@ $stats['month_records'] = $conn->query("SELECT COUNT(*) as count FROM attendance
             font-size: 4rem;
             margin-bottom: 20px;
             opacity: 0.3;
+        }
+
+        .empty-state h3 {
+            font-size: 1.2rem;
+            color: var(--text-primary);
+            margin-bottom: 8px;
+            font-weight: 700;
+        }
+
+        .empty-state p {
+            font-size: 0.9rem;
         }
 
         .modal {
@@ -647,11 +776,12 @@ $stats['month_records'] = $conn->query("SELECT COUNT(*) as count FROM attendance
 
         .modal-content {
             background: var(--card-bg);
-            border: 1px solid rgba(157, 78, 221, 0.3);
-            border-radius: 15px;
+            border-radius: 20px;
             padding: 30px;
             width: 90%;
             max-width: 500px;
+            box-shadow: var(--shadow-lg);
+            border: 3px solid var(--accent-orange);
         }
 
         .modal-header {
@@ -662,10 +792,12 @@ $stats['month_records'] = $conn->query("SELECT COUNT(*) as count FROM attendance
         }
 
         .modal-header h2 {
-            color: var(--text-light);
+            color: var(--text-primary);
             display: flex;
             align-items: center;
             gap: 10px;
+            font-size: 1.5rem;
+            font-weight: 700;
         }
 
         .close-modal {
@@ -674,11 +806,18 @@ $stats['month_records'] = $conn->query("SELECT COUNT(*) as count FROM attendance
             color: var(--text-secondary);
             font-size: 1.5rem;
             cursor: pointer;
-            transition: color 0.3s;
+            transition: all 0.3s;
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
         }
 
         .close-modal:hover {
-            color: var(--error);
+            color: var(--danger);
+            background: rgba(239, 68, 68, 0.1);
         }
 
         .form-group {
@@ -690,29 +829,28 @@ $stats['month_records'] = $conn->query("SELECT COUNT(*) as count FROM attendance
             color: var(--text-secondary);
             font-size: 0.85rem;
             margin-bottom: 8px;
-            font-weight: 500;
+            font-weight: 600;
         }
 
         .form-group input,
         .form-group select {
             width: 100%;
             padding: 12px 15px;
-            background: rgba(255, 255, 255, 0.05);
-            border: 2px solid rgba(157, 78, 221, 0.3);
-            border-radius: 8px;
-            color: var(--text-light);
+            background: var(--hover-bg);
+            border: 2px solid var(--border-color);
+            border-radius: 10px;
+            color: var(--text-primary);
             font-size: 0.95rem;
-        }
-
-        .form-group select option {
-            background: var(--card-bg);
-            color: var(--text-light);
+            font-family: 'Inter', sans-serif;
+            transition: all 0.3s ease;
         }
 
         .form-group input:focus,
         .form-group select:focus {
             outline: none;
-            border-color: var(--accent-green);
+            border-color: var(--accent-purple);
+            background: white;
+            box-shadow: 0 0 0 4px rgba(181, 101, 216, 0.1);
         }
 
         .form-actions {
@@ -724,95 +862,125 @@ $stats['month_records'] = $conn->query("SELECT COUNT(*) as count FROM attendance
         .btn-submit {
             flex: 1;
             padding: 12px;
-            background: linear-gradient(135deg, var(--primary-blue), var(--primary-blue-dark));
+            background: linear-gradient(135deg, var(--primary-blue), var(--primary-teal));
             color: white;
             border: none;
-            border-radius: 8px;
+            border-radius: 10px;
             cursor: pointer;
             font-weight: 600;
             transition: all 0.3s ease;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            box-shadow: var(--shadow);
         }
 
         .btn-submit:hover {
             transform: translateY(-2px);
-            box-shadow: 0 10px 25px rgba(74, 144, 226, 0.3);
+            box-shadow: var(--shadow-md);
         }
 
         .btn-cancel {
             flex: 1;
             padding: 12px;
-            background: rgba(255, 71, 87, 0.1);
-            color: var(--error);
-            border: 2px solid var(--error);
-            border-radius: 8px;
+            background: white;
+            color: var(--danger);
+            border: 2px solid var(--danger);
+            border-radius: 10px;
             cursor: pointer;
             font-weight: 600;
             transition: all 0.3s ease;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
         }
 
         .btn-cancel:hover {
-            background: var(--error);
+            background: var(--danger);
             color: white;
         }
 
-        .pagination {
-            display: flex;
-            justify-content: center;
+        .grade-badge {
+            display: inline-flex;
             align-items: center;
-            gap: 10px;
-            margin-top: 20px;
-            padding-top: 20px;
-            border-top: 1px solid rgba(255, 255, 255, 0.05);
+            gap: 6px;
+            padding: 6px 12px;
+            background: linear-gradient(135deg, var(--accent-orange), var(--accent-yellow));
+            border-radius: 20px;
+            color: white;
+            font-weight: 600;
+            font-size: 0.8rem;
+            box-shadow: var(--shadow);
         }
 
-        .pagination-info {
-            color: var(--text-secondary);
-            font-size: 0.9rem;
+        @media (max-width: 768px) {
+            .filter-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .search-box {
+                width: 100%;
+            }
+
+            .stats-row {
+                grid-template-columns: 1fr;
+            }
+
+            .filter-actions {
+                flex-direction: column;
+            }
+
+            .btn-export {
+                margin-left: 0;
+            }
         }
     </style>
 </head>
+
 <body>
     <div class="dashboard-container">
         <aside class="sidebar">
             <div class="sidebar-header">
-                <h2>Attendance System</h2>
-                <p><?php echo htmlspecialchars($_SESSION['role']); ?></p>
+                <h2>Elementary School</h2>
+                <p>Attendance System</p>
             </div>
 
             <nav class="sidebar-nav">
                 <div class="nav-item" onclick="location.href='dashboard.php'">
-                    <i class="fas fa-chart-line"></i>
                     <span>Dashboard</span>
                 </div>
+                <div class="nav-item" onclick="location.href='sections.php'">
+                    <span>Sections</span>
+                </div>
                 <div class="nav-item" onclick="location.href='students.php'">
-                    <i class="fas fa-users"></i>
                     <span>Students</span>
                 </div>
                 <div class="nav-item" onclick="location.href='attendance.php'">
-                    <i class="fas fa-clipboard-check"></i>
-                    <span>Mark Attendance</span>
+                    <span>Attendance</span>
                 </div>
                 <div class="nav-item active">
-                    <i class="fas fa-history"></i>
-                    <span>Attendance Records</span>
+                    <span>Records</span>
                 </div>
                 <div class="nav-item" onclick="location.href='reports.php'">
-                    <i class="fas fa-file-alt"></i>
                     <span>Reports</span>
                 </div>
             </nav>
 
-            <div class="sidebar-footer">
-                <button class="logout-btn" onclick="logout()">
-                    <i class="fas fa-sign-out-alt"></i> Logout
-                </button>
-            </div>
+            <button class="logout-btn" onclick="logout()">
+                <i class="fas fa-sign-out-alt"></i> Logout
+            </button>
         </aside>
 
         <main class="main-content">
             <div class="header">
                 <h1 class="page-title">Attendance Records</h1>
                 <div class="header-actions">
+                    <div class="date-display">
+                        <i class="fas fa-calendar-day"></i>
+                        <span><?php echo date('l, F d, Y'); ?></span>
+                    </div>
                     <div class="user-profile">
                         <div class="user-avatar"><?php echo strtoupper(substr($_SESSION['fullname'], 0, 2)); ?></div>
                         <span><?php echo htmlspecialchars($_SESSION['fullname']); ?></span>
@@ -876,70 +1044,45 @@ $stats['month_records'] = $conn->query("SELECT COUNT(*) as count FROM attendance
 
                 <div class="filter-grid">
                     <div class="filter-group">
-                        <label>Date From</label>
+                        <label><i class="fas fa-calendar"></i> Date From</label>
                         <input type="date" id="date_from" value="<?php echo date('Y-m-01'); ?>">
                     </div>
 
                     <div class="filter-group">
-                        <label>Date To</label>
-                        <input type="date" id="date_to" value="<?php echo date('Y-m-d'); ?>">
+                        <label><i class="fas fa-calendar"></i> Date To</label>
+                        <input type="date" id="date_to" value="<?php echo date('Y-m-d'); ?>" max="<?php echo date('Y-m-d'); ?>">
                     </div>
 
                     <div class="filter-group">
-                        <label>Department</label>
-                        <select id="filter_department" onchange="loadFilterCourses()">
-                            <option value="">All Departments</option>
-                            <?php 
-                            $departments->data_seek(0);
-                            while ($dept = $departments->fetch_assoc()): 
+                        <label><i class="fas fa-graduation-cap"></i> Grade Level</label>
+                        <select id="filter_grade" onchange="loadFilterSections()">
+                            <option value="">All Grades</option>
+                            <?php
+                            $grade_levels->data_seek(0);
+                            while ($grade = $grade_levels->fetch_assoc()):
                             ?>
-                                <option value="<?php echo $dept['id']; ?>">
-                                    <?php echo htmlspecialchars($dept['code']); ?>
+                                <option value="<?php echo $grade['id']; ?>">
+                                    <?php echo htmlspecialchars($grade['grade_name']); ?>
                                 </option>
                             <?php endwhile; ?>
                         </select>
                     </div>
 
                     <div class="filter-group">
-                        <label>Course</label>
-                        <select id="filter_course">
-                            <option value="">All Courses</option>
-                        </select>
-                    </div>
-
-                    <div class="filter-group">
-                        <label>Year Level</label>
-                        <select id="filter_year">
-                            <option value="">All Years</option>
-                            <option value="1st Year">1st Year</option>
-                            <option value="2nd Year">2nd Year</option>
-                            <option value="3rd Year">3rd Year</option>
-                            <option value="4th Year">4th Year</option>
-                        </select>
-                    </div>
-
-                    <div class="filter-group">
-                        <label>Section</label>
+                        <label><i class="fas fa-users"></i> Section</label>
                         <select id="filter_section">
                             <option value="">All Sections</option>
-                            <?php 
-                            $sections->data_seek(0);
-                            while ($section = $sections->fetch_assoc()): 
-                            ?>
-                                <option value="<?php echo $section['id']; ?>">
-                                    <?php echo htmlspecialchars($section['name']); ?>
-                                </option>
-                            <?php endwhile; ?>
                         </select>
                     </div>
 
                     <div class="filter-group">
-                        <label>Status</label>
+                        <label><i class="fas fa-info-circle"></i> Status</label>
                         <select id="filter_status">
                             <option value="">All Status</option>
                             <option value="Present">Present</option>
                             <option value="Late">Late</option>
                             <option value="Absent">Absent</option>
+                            <option value="Excused">Excused</option>
                         </select>
                     </div>
                 </div>
@@ -997,26 +1140,32 @@ $stats['month_records'] = $conn->query("SELECT COUNT(*) as count FROM attendance
             </div>
             <form id="editForm">
                 <input type="hidden" id="edit_id">
-                
+
                 <div class="form-group">
-                    <label>Status *</label>
+                    <label><i class="fas fa-check-circle"></i> Status *</label>
                     <select id="edit_status" required>
                         <option value="Present">Present</option>
                         <option value="Late">Late</option>
                         <option value="Absent">Absent</option>
+                        <option value="Excused">Excused</option>
                     </select>
                 </div>
-                
+
                 <div class="form-group">
-                    <label>Time In</label>
+                    <label><i class="fas fa-clock"></i> Time In</label>
                     <input type="time" id="edit_time_in">
                 </div>
-                
+
                 <div class="form-group">
-                    <label>Remarks</label>
+                    <label><i class="fas fa-clock"></i> Time Out</label>
+                    <input type="time" id="edit_time_out">
+                </div>
+
+                <div class="form-group">
+                    <label><i class="fas fa-comment"></i> Remarks</label>
                     <input type="text" id="edit_remarks" placeholder="Optional remarks...">
                 </div>
-                
+
                 <div class="form-actions">
                     <button type="submit" class="btn-submit">
                         <i class="fas fa-save"></i> Update Record
@@ -1047,109 +1196,108 @@ $stats['month_records'] = $conn->query("SELECT COUNT(*) as count FROM attendance
                 <i class="fas fa-${type === 'success' ? 'check-circle' : 'exclamation-circle'}"></i>
                 <span>${message}</span>
             `;
-            
+
             container.innerHTML = '';
             container.appendChild(messageBox);
-            
+
             setTimeout(() => {
                 messageBox.style.opacity = '0';
                 setTimeout(() => messageBox.remove(), 300);
             }, 3000);
         }
 
-        function loadFilterCourses() {
-            const departmentId = document.getElementById('filter_department').value;
-            const courseSelect = document.getElementById('filter_course');
-            
-            if (!departmentId) {
-                courseSelect.innerHTML = '<option value="">All Courses</option>';
+        function loadFilterSections() {
+            const gradeId = document.getElementById('filter_grade').value;
+            const sectionSelect = document.getElementById('filter_section');
+
+            if (!gradeId) {
+                sectionSelect.innerHTML = '<option value="">All Sections</option>';
                 return;
             }
-            
-            courseSelect.innerHTML = '<option value="">Loading...</option>';
-            
+
+            sectionSelect.innerHTML = '<option value="">Loading...</option>';
+
             const formData = new FormData();
             formData.append('ajax', '1');
-            formData.append('action', 'get_courses');
-            formData.append('department_id', departmentId);
-            
-            fetch('students.php', {
-                method: 'POST',
-                body: formData
-            })
-            .then(response => response.json())
-            .then(data => {
-                if (data.success) {
-                    courseSelect.innerHTML = '<option value="">All Courses</option>';
-                    data.data.forEach(course => {
-                        const option = document.createElement('option');
-                        option.value = course.id;
-                        option.textContent = course.code;
-                        courseSelect.appendChild(option);
-                    });
-                } else {
-                    courseSelect.innerHTML = '<option value="">No courses found</option>';
-                }
-            })
-            .catch(error => {
-                console.error('Error:', error);
-                courseSelect.innerHTML = '<option value="">Error loading courses</option>';
-            });
+            formData.append('action', 'get_sections');
+            formData.append('grade_id', gradeId);
+
+            fetch('records.php', {
+                    method: 'POST',
+                    body: formData
+                })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        sectionSelect.innerHTML = '<option value="">All Sections</option>';
+                        data.data.forEach(section => {
+                            const option = document.createElement('option');
+                            option.value = section.id;
+                            option.textContent = section.name;
+                            sectionSelect.appendChild(option);
+                        });
+                    } else {
+                        sectionSelect.innerHTML = '<option value="">No sections found</option>';
+                    }
+                })
+                .catch(error => {
+                    console.error('Error:', error);
+                    sectionSelect.innerHTML = '<option value="">Error loading sections</option>';
+                    showMessage('error', 'Failed to load sections');
+                });
         }
 
         function applyFilters() {
             const container = document.getElementById('recordsTableContainer');
             container.innerHTML = '<div class="loading"><i class="fas fa-spinner"></i><p>Loading records...</p></div>';
-            
+
             const formData = new FormData();
             formData.append('ajax', '1');
             formData.append('action', 'get_records');
             formData.append('date_from', document.getElementById('date_from').value);
             formData.append('date_to', document.getElementById('date_to').value);
-            formData.append('department_id', document.getElementById('filter_department').value);
-            formData.append('course_id', document.getElementById('filter_course').value);
-            formData.append('year_level', document.getElementById('filter_year').value);
+            formData.append('grade_level_id', document.getElementById('filter_grade').value);
             formData.append('section_id', document.getElementById('filter_section').value);
             formData.append('status', document.getElementById('filter_status').value);
             formData.append('search', document.getElementById('searchInput').value);
-            
+
             fetch('records.php', {
-                method: 'POST',
-                body: formData
-            })
-            .then(response => response.json())
-            .then(data => {
-                if (data.success) {
-                    currentRecords = data.data;
-                    filteredRecords = data.data;
-                    renderRecordsTable();
-                    document.getElementById('recordsCount').textContent = `${data.data.length} Record(s) Found`;
-                    showMessage('success', `Loaded ${data.data.length} records`);
-                } else {
-                    container.innerHTML = `
+                    method: 'POST',
+                    body: formData
+                })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        currentRecords = data.data;
+                        filteredRecords = data.data;
+                        renderRecordsTable();
+                        document.getElementById('recordsCount').textContent = `${data.data.length} Record(s) Found`;
+                        showMessage('success', `Loaded ${data.data.length} records`);
+                    } else {
+                        container.innerHTML = `
                         <div class="empty-state">
                             <i class="fas fa-exclamation-triangle"></i>
                             <h3>Error</h3>
                             <p>${data.message}</p>
                         </div>
                     `;
-                }
-            })
-            .catch(error => {
-                console.error('Error:', error);
-                container.innerHTML = `
+                    }
+                })
+                .catch(error => {
+                    console.error('Error:', error);
+                    container.innerHTML = `
                     <div class="empty-state">
                         <i class="fas fa-exclamation-triangle"></i>
                         <h3>Error</h3>
                         <p>Failed to load records</p>
                     </div>
                 `;
-            });
+                });
         }
 
         function renderRecordsTable() {
             const container = document.getElementById('recordsTableContainer');
-            
+
             if (filteredRecords.length === 0) {
                 container.innerHTML = `
                     <div class="empty-state">
@@ -1160,23 +1308,21 @@ $stats['month_records'] = $conn->query("SELECT COUNT(*) as count FROM attendance
                 `;
                 return;
             }
-            
+
             let html = `
                 <table class="records-table">
                     <thead>
                         <tr>
                             <th style="width: 5%">#</th>
                             <th style="width: 10%">Date</th>
-                            <th style="width: 10%">Student ID</th>
+                            <th style="width: 12%">Student ID</th>
                             <th style="width: 20%">Student Name</th>
-                            <th style="width: 8%">Dept</th>
-                            <th style="width: 8%">Course</th>
-                            <th style="width: 8%">Year</th>
-                            <th style="width: 8%">Section</th>
+                            <th style="width: 12%">Grade Level</th>
+                            <th style="width: 10%">Section</th>
                             <th style="width: 10%">Status</th>
                             <th style="width: 8%">Time In</th>
-                            <th style="width: 15%">Remarks</th>
-                            <th style="width: 10%">Actions</th>
+                            <th style="width: 8%">Time Out</th>
+                            <th style="width: 15%">Actions</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -1187,19 +1333,22 @@ $stats['month_records'] = $conn->query("SELECT COUNT(*) as count FROM attendance
                     <tr>
                         <td>${index + 1}</td>
                         <td>${formatDate(record.attendance_date)}</td>
-                        <td>${record.student_id}</td>
+                        <td><strong>${record.student_id}</strong></td>
                         <td>${record.student_name}</td>
-                        <td>${record.department_code || 'N/A'}</td>
-                        <td>${record.course_code || 'N/A'}</td>
-                        <td>${record.year_level}</td>
+                        <td>
+                            <span class="grade-badge">
+                                <i class="fas fa-graduation-cap"></i>
+                                ${record.grade_name || 'N/A'}
+                            </span>
+                        </td>
                         <td>${record.section_name || 'N/A'}</td>
                         <td>
                             <span class="status-badge status-${record.status.toLowerCase()}">
                                 ${record.status}
                             </span>
                         </td>
-                        <td>${record.time_in || 'N/A'}</td>
-                        <td>${record.remarks || '-'}</td>
+                        <td>${record.time_in ? formatTime(record.time_in) : 'N/A'}</td>
+                        <td>${record.time_out ? formatTime(record.time_out) : 'N/A'}</td>
                         <td>
                             <div class="action-buttons">
                                 <button class="btn-icon btn-edit" onclick="editRecord(${record.id})" title="Edit">
@@ -1224,8 +1373,21 @@ $stats['month_records'] = $conn->query("SELECT COUNT(*) as count FROM attendance
 
         function formatDate(dateString) {
             const date = new Date(dateString);
-            const options = { year: 'numeric', month: 'short', day: 'numeric' };
+            const options = {
+                year: 'numeric',
+                month: 'short',
+                day: 'numeric'
+            };
             return date.toLocaleDateString('en-US', options);
+        }
+
+        function formatTime(timeString) {
+            if (!timeString) return 'N/A';
+            const [hours, minutes] = timeString.split(':');
+            const hour = parseInt(hours);
+            const ampm = hour >= 12 ? 'PM' : 'AM';
+            const displayHour = hour % 12 || 12;
+            return `${displayHour}:${minutes} ${ampm}`;
         }
 
         function editRecord(id) {
@@ -1233,55 +1395,60 @@ $stats['month_records'] = $conn->query("SELECT COUNT(*) as count FROM attendance
             formData.append('ajax', '1');
             formData.append('action', 'get_record');
             formData.append('id', id);
-            
+
             fetch('records.php', {
-                method: 'POST',
-                body: formData
-            })
-            .then(response => response.json())
-            .then(data => {
-                if (data.success) {
-                    const record = data.data;
-                    document.getElementById('edit_id').value = record.id;
-                    document.getElementById('edit_status').value = record.status;
-                    document.getElementById('edit_time_in').value = record.time_in || '';
-                    document.getElementById('edit_remarks').value = record.remarks || '';
-                    document.getElementById('editModal').classList.add('active');
-                } else {
-                    showMessage('error', data.message);
-                }
-            })
-            .catch(error => {
-                console.error('Error:', error);
-                showMessage('error', 'Failed to load record');
-            });
+                    method: 'POST',
+                    body: formData
+                })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        const record = data.data;
+                        document.getElementById('edit_id').value = record.id;
+                        document.getElementById('edit_status').value = record.status;
+                        document.getElementById('edit_time_in').value = record.time_in || '';
+                        document.getElementById('edit_time_out').value = record.time_out || '';
+                        document.getElementById('edit_remarks').value = record.remarks || '';
+
+                        // Handle disabled state for absent
+                        handleStatusChange();
+
+                        document.getElementById('editModal').classList.add('active');
+                    } else {
+                        showMessage('error', data.message);
+                    }
+                })
+                .catch(error => {
+                    console.error('Error:', error);
+                    showMessage('error', 'Failed to load record');
+                });
         }
 
         function deleteRecord(id) {
-            if (!confirm('Are you sure you want to delete this record?')) {
+            if (!confirm('Are you sure you want to delete this record? This action cannot be undone.')) {
                 return;
             }
-            
+
             const formData = new FormData();
             formData.append('ajax', '1');
             formData.append('action', 'delete_record');
             formData.append('id', id);
-            
+
             fetch('records.php', {
-                method: 'POST',
-                body: formData
-            })
-            .then(response => response.json())
-            .then(data => {
-                showMessage(data.success ? 'success' : 'error', data.message);
-                if (data.success) {
-                    applyFilters();
-                }
-            })
-            .catch(error => {
-                console.error('Error:', error);
-                showMessage('error', 'Failed to delete record');
-            });
+                    method: 'POST',
+                    body: formData
+                })
+                .then(response => response.json())
+                .then(data => {
+                    showMessage(data.success ? 'success' : 'error', data.message);
+                    if (data.success) {
+                        applyFilters();
+                    }
+                })
+                .catch(error => {
+                    console.error('Error:', error);
+                    showMessage('error', 'Failed to delete record');
+                });
         }
 
         function closeModal() {
@@ -1291,10 +1458,8 @@ $stats['month_records'] = $conn->query("SELECT COUNT(*) as count FROM attendance
         function resetFilters() {
             document.getElementById('date_from').value = '<?php echo date('Y-m-01'); ?>';
             document.getElementById('date_to').value = '<?php echo date('Y-m-d'); ?>';
-            document.getElementById('filter_department').value = '';
-            document.getElementById('filter_course').innerHTML = '<option value="">All Courses</option>';
-            document.getElementById('filter_year').value = '';
-            document.getElementById('filter_section').value = '';
+            document.getElementById('filter_grade').value = '';
+            document.getElementById('filter_section').innerHTML = '<option value="">All Sections</option>';
             document.getElementById('filter_status').value = '';
             document.getElementById('searchInput').value = '';
             applyFilters();
@@ -1304,19 +1469,17 @@ $stats['month_records'] = $conn->query("SELECT COUNT(*) as count FROM attendance
             const form = document.createElement('form');
             form.method = 'POST';
             form.action = 'records.php';
-            
+
             const fields = {
                 'ajax': '1',
                 'action': 'export_csv',
                 'date_from': document.getElementById('date_from').value,
                 'date_to': document.getElementById('date_to').value,
-                'department_id': document.getElementById('filter_department').value,
-                'course_id': document.getElementById('filter_course').value,
-                'year_level': document.getElementById('filter_year').value,
+                'grade_level_id': document.getElementById('filter_grade').value,
                 'section_id': document.getElementById('filter_section').value,
                 'status': document.getElementById('filter_status').value
             };
-            
+
             for (const key in fields) {
                 const input = document.createElement('input');
                 input.type = 'hidden';
@@ -1324,60 +1487,80 @@ $stats['month_records'] = $conn->query("SELECT COUNT(*) as count FROM attendance
                 input.value = fields[key];
                 form.appendChild(input);
             }
-            
+
             document.body.appendChild(form);
             form.submit();
             document.body.removeChild(form);
-            
+
             showMessage('success', 'Exporting records to CSV...');
+        }
+
+        function handleStatusChange() {
+            const status = document.getElementById('edit_status').value;
+            const timeInInput = document.getElementById('edit_time_in');
+            const timeOutInput = document.getElementById('edit_time_out');
+
+            if (status === 'Absent') {
+                timeInInput.value = '';
+                timeInInput.disabled = true;
+                timeOutInput.value = '';
+                timeOutInput.disabled = true;
+            } else {
+                timeInInput.disabled = false;
+                timeOutInput.disabled = false;
+            }
         }
 
         // Handle edit form submission
         document.getElementById('editForm').addEventListener('submit', function(e) {
             e.preventDefault();
-            
+
             const formData = new FormData();
             formData.append('ajax', '1');
             formData.append('action', 'update_record');
             formData.append('id', document.getElementById('edit_id').value);
             formData.append('status', document.getElementById('edit_status').value);
             formData.append('time_in', document.getElementById('edit_time_in').value);
+            formData.append('time_out', document.getElementById('edit_time_out').value);
             formData.append('remarks', document.getElementById('edit_remarks').value);
-            
+
             fetch('records.php', {
-                method: 'POST',
-                body: formData
-            })
-            .then(response => response.json())
-            .then(data => {
-                showMessage(data.success ? 'success' : 'error', data.message);
-                if (data.success) {
-                    closeModal();
-                    applyFilters();
-                }
-            })
-            .catch(error => {
-                console.error('Error:', error);
-                showMessage('error', 'Failed to update record');
-            });
+                    method: 'POST',
+                    body: formData
+                })
+                .then(response => response.json())
+                .then(data => {
+                    showMessage(data.success ? 'success' : 'error', data.message);
+                    if (data.success) {
+                        closeModal();
+                        applyFilters();
+                    }
+                })
+                .catch(error => {
+                    console.error('Error:', error);
+                    showMessage('error', 'Failed to update record');
+                });
         });
 
         // Search functionality
         document.getElementById('searchInput').addEventListener('input', function(e) {
             const searchTerm = e.target.value.toLowerCase();
-            
+
             if (searchTerm === '') {
                 filteredRecords = currentRecords;
             } else {
-                filteredRecords = currentRecords.filter(record => 
+                filteredRecords = currentRecords.filter(record =>
                     record.student_id.toLowerCase().includes(searchTerm) ||
                     record.student_name.toLowerCase().includes(searchTerm)
                 );
             }
-            
+
             renderRecordsTable();
             document.getElementById('recordsCount').textContent = `${filteredRecords.length} Record(s) Found`;
         });
+
+        // Status change handler
+        document.getElementById('edit_status').addEventListener('change', handleStatusChange);
 
         // Close modal when clicking outside
         document.getElementById('editModal').addEventListener('click', function(e) {
@@ -1393,21 +1576,14 @@ $stats['month_records'] = $conn->query("SELECT COUNT(*) as count FROM attendance
             }
         });
 
-        // Auto-disable time input when status is Absent
-        document.getElementById('edit_status').addEventListener('change', function() {
-            const timeInput = document.getElementById('edit_time_in');
-            if (this.value === 'Absent') {
-                timeInput.value = '';
-                timeInput.disabled = true;
-            } else {
-                timeInput.disabled = false;
-            }
-        });
-
         // Load records on page load
         window.addEventListener('DOMContentLoaded', function() {
             applyFilters();
         });
     </script>
 </body>
+
 </html>
+<?php
+$conn->close();
+?>

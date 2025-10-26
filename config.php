@@ -357,4 +357,43 @@ ini_set('display_errors', 1);
 // Set default character encoding
 mb_internal_encoding('UTF-8');
 mb_http_output('UTF-8');
+
+function uploadExcuseLetter($file, $student_id, $date) {
+    $target_dir = "uploads/excuse_letters/";
+    
+    // Create directory if it doesn't exist
+    if (!file_exists($target_dir)) {
+        mkdir($target_dir, 0777, true);
+    }
+    
+    $file_extension = strtolower(pathinfo($file["name"], PATHINFO_EXTENSION));
+    $allowed_extensions = array("jpg", "jpeg", "png", "pdf");
+    
+    // Validate file type
+    if (!in_array($file_extension, $allowed_extensions)) {
+        return array('success' => false, 'message' => 'Only JPG, JPEG, PNG, and PDF files are allowed');
+    }
+    
+    // Validate file size (max 5MB)
+    if ($file["size"] > 5000000) {
+        return array('success' => false, 'message' => 'File size must be less than 5MB');
+    }
+    
+    // Generate unique filename
+    $filename = "excuse_" . $student_id . "_" . date('Ymd', strtotime($date)) . "_" . time() . "." . $file_extension;
+    $target_file = $target_dir . $filename;
+    
+    // Upload file
+    if (move_uploaded_file($file["tmp_name"], $target_file)) {
+        return array('success' => true, 'filename' => $filename);
+    } else {
+        return array('success' => false, 'message' => 'Failed to upload file');
+    }
+}
+
+function deleteExcuseLetter($filename) {
+    if ($filename && file_exists("uploads/excuse_letters/" . $filename)) {
+        unlink("uploads/excuse_letters/" . $filename);
+    }
+}
 ?>

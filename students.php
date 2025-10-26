@@ -595,23 +595,23 @@ if (!empty($filters['grade'])) {
 
             <nav class="sidebar-nav">
                 <div class="nav-item" onclick="location.href='dashboard.php'">
-                    <i class="fas fa-chart-line"></i>
                     <span>Dashboard</span>
                 </div>
+                <div class="sidebar-nav">
+                    <div class="nav-item" onclick="location.href='sections.php'">
+                        <span>Sections</span>
+                    </div>
+                </div>
                 <div class="nav-item active">
-                    <i class="fas fa-users"></i>
                     <span>Students</span>
                 </div>
                 <div class="nav-item" onclick="location.href='attendance.php'">
-                    <i class="fas fa-clipboard-check"></i>
-                    <span>Mark Attendance</span>
+                    <span>Attendance</span>
                 </div>
                 <div class="nav-item" onclick="location.href='records.php'">
-                    <i class="fas fa-history"></i>
-                    <span>Attendance Records</span>
+                    <span>Records</span>
                 </div>
                 <div class="nav-item" onclick="location.href='reports.php'">
-                    <i class="fas fa-file-alt"></i>
                     <span>Reports</span>
                 </div>
             </nav>
@@ -873,12 +873,13 @@ if (!empty($filters['grade'])) {
                     </div>
 
                     <div class="form-actions">
-                        <button type="submit" class="btn-submit">
-                            <i class="fas fa-save"></i> Save Student
-                        </button>
                         <button type="button" class="btn-cancel" onclick="closeModal()">
                             <i class="fas fa-times"></i> Cancel
                         </button>
+                        <button type="submit" class="btn-submit">
+                            <i class="fas fa-save"></i> Save Student
+                        </button>
+
                     </div>
                 </div>
             </form>
