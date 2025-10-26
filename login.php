@@ -14,6 +14,55 @@ if (isset($_SESSION['user_id'])) {
     <title>Elementary Attendance Monitoring System - Login</title>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
     <link rel="stylesheet" href="styles.css">
+    <style>
+        /* Password Toggle Icon Fix */
+        .input-wrapper {
+            position: relative;
+        }
+
+        .password-toggle {
+            position: absolute;
+            right: 10px;
+            top: 50%;
+            transform: translateY(-50%);
+            background: transparent;
+            border: none;
+            color: #8B8B9A;
+            cursor: pointer;
+            font-size: 1.1rem;
+            width: 36px;
+            height: 36px;
+            padding: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.2s ease;
+            z-index: 10;
+            border-radius: 6px;
+            opacity: 0.7;
+        }
+
+        .password-toggle:hover {
+            color: #00D084;
+            background: rgba(0, 208, 132, 0.08);
+            opacity: 1;
+        }
+
+        .password-toggle:active {
+            transform: translateY(-50%) scale(0.92);
+        }
+
+        .password-toggle i {
+            pointer-events: none;
+            line-height: 1;
+        }
+
+        /* Ensure input has proper padding for the toggle button */
+        .input-wrapper input[type="password"],
+        .input-wrapper input[type="text"].password-field {
+            padding-right: 50px;
+        }
+    </style>
 </head>
 
 <body>
@@ -117,7 +166,7 @@ if (isset($_SESSION['user_id'])) {
                 <label for="reg_username">Username</label>
                 <div class="input-wrapper">
                     <i class="fas fa-user"></i>
-                    <input type="text" id="reg_username" name="username" placeholder="Choose a username" required>
+                    <input type="text" id="reg_username" name="username" placeholder="Choose a username" required minlength="4">
                 </div>
             </div>
 
@@ -130,21 +179,10 @@ if (isset($_SESSION['user_id'])) {
             </div>
 
             <div class="form-group">
-                <label for="reg_role">Role</label>
-                <div class="input-wrapper">
-                    <i class="fas fa-user-tag"></i>
-                    <select id="reg_role" name="role" required>
-                        <option value="Teacher">Teacher</option>
-                        <option value="Admin">Admin</option>
-                    </select>
-                </div>
-            </div>
-
-            <div class="form-group">
                 <label for="reg_password">Password</label>
                 <div class="input-wrapper">
                     <i class="fas fa-lock"></i>
-                    <input type="password" id="reg_password" name="password" placeholder="Create a password" required>
+                    <input type="password" id="reg_password" name="password" placeholder="Create a password" required minlength="6">
                     <button type="button" class="password-toggle" onclick="toggleRegPassword('reg_password')">
                         <i class="fas fa-eye"></i>
                     </button>
