@@ -453,6 +453,25 @@ if (!empty($filters['grade'])) {
             box-shadow: var(--shadow);
         }
 
+         .logout-btn {
+            margin: 24px 12px 0;
+            margin-top: 22rem;
+            padding: 12px 20px;
+            background: linear-gradient(135deg, rgba(239, 68, 68, 0.1), rgba(255, 111, 145, 0.1));
+            border: 2px solid var(--danger);
+            color: var(--danger);
+            border-radius: 12px;
+            cursor: pointer;
+            font-weight: 600;
+            font-size: 0.9rem;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            transition: all 0.3s ease;
+            width: calc(100% - 24px);
+        }
+
         .btn-submit:hover {
             transform: translateY(-2px);
             box-shadow: var(--shadow-md);
@@ -595,7 +614,7 @@ if (!empty($filters['grade'])) {
 
             <nav class="sidebar-nav">
                 <div class="nav-item" onclick="location.href='dashboard.php'">
-                    <span>Dashboard</span>
+                    <span>Home</span>
                 </div>
                 <div class="sidebar-nav">
                     <div class="nav-item" onclick="location.href='sections.php'">

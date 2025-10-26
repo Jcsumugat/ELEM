@@ -213,6 +213,7 @@ $conn->close();
 
         .logout-btn {
             margin: 24px 12px 0;
+            margin-top: 22rem;
             padding: 12px 20px;
             background: linear-gradient(135deg, rgba(239, 68, 68, 0.1), rgba(255, 111, 145, 0.1));
             border: 2px solid var(--danger);
@@ -437,7 +438,7 @@ $conn->close();
             padding: 25px 30px;
             background: linear-gradient(135deg, rgba(255, 150, 113, 0.08), rgba(255, 111, 145, 0.08));
             border-radius: 16px;
-            border-left: 4px solid var(--accent-orange);
+            border: 2px solid var(--accent-orange);
             position: relative;
             z-index: 1;
         }
@@ -445,7 +446,7 @@ $conn->close();
         .quote-icon {
             font-size: 2rem;
             color: var(--accent-orange);
-            opacity: 0.25;
+            opacity: 0.50;
             margin-bottom: 12px;
         }
 
@@ -565,27 +566,21 @@ $conn->close();
 
             <nav class="sidebar-nav">
                 <div class="nav-item active">
-                    <i class="fas fa-home"></i>
-                    <span>Dashboard</span>
+                    <span>Home</span>
                 </div>
                 <div class="nav-item" onclick="location.href='sections.php'">
-                    <i class="fas fa-door-open"></i>
                     <span>Sections</span>
                 </div>
                 <div class="nav-item" onclick="location.href='students.php'">
-                    <i class="fas fa-user-graduate"></i>
                     <span>Students</span>
                 </div>
                 <div class="nav-item" onclick="location.href='attendance.php'">
-                    <i class="fas fa-clipboard-check"></i>
                     <span>Attendance</span>
                 </div>
                 <div class="nav-item" onclick="location.href='records.php'">
-                    <i class="fas fa-folder-open"></i>
                     <span>Records</span>
                 </div>
                 <div class="nav-item" onclick="location.href='reports.php'">
-                    <i class="fas fa-chart-bar"></i>
                     <span>Reports</span>
                 </div>
             </nav>
@@ -597,7 +592,7 @@ $conn->close();
 
         <main class="main-content">
             <div class="header">
-                <h1 class="page-title">Dashboard</h1>
+                <h1 class="page-title">Home</h1>
                 <div class="header-actions">
                     <div class="date-display">
                         <i class="fas fa-calendar-day"></i>
@@ -628,7 +623,7 @@ $conn->close();
                             <i class="fas fa-quote-left"></i>
                         </div>
                         <p class="quote-text">
-                            Education is the most powerful weapon which you can use to change the world.
+                            "Education is the most powerful weapon which you can use to change the world".
                         </p>
                         <p class="quote-author">— Nelson Mandela</p>
                     </div>
