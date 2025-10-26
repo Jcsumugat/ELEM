@@ -609,7 +609,7 @@ if (!empty($filters['grade'])) {
         <aside class="sidebar">
             <div class="sidebar-header">
                 <h2>Elementary School</h2>
-                <p>Attendance System</p>
+            <p>San Francisco Sur Elementary School Attendance Monitoring System.</p>
             </div>
 
             <nav class="sidebar-nav">

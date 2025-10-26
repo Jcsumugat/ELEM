@@ -723,7 +723,7 @@ $grade_levels = $conn->query("SELECT id, grade_number, grade_name FROM grade_lev
         <aside class="sidebar">
             <div class="sidebar-header">
                 <h2>Elementary School</h2>
-                <p>Attendance System</p>
+                <p>San Francisco Sur Elementary School Attendance Monitoring System.</p>
             </div>
 
             <nav class="sidebar-nav">

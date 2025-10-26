@@ -77,8 +77,8 @@ if (isset($_SESSION['user_id'])) {
             <div class="logo-icon">
                 <i class="fas fa-school"></i>
             </div>
-            <h1>Welcome Back</h1>
-            <p>Elementary Attendance Monitoring System</p>
+            <h1>SIGN IN</h1>
+            <p>San Francisco Sur Elementary School Attendance Monitoring System.</p>
         </div>
 
         <div id="messageBox" class="message"></div>
