@@ -455,7 +455,7 @@ if (!empty($filters['grade'])) {
 
          .logout-btn {
             margin: 24px 12px 0;
-            margin-top: 22rem;
+            margin-top: 20rem;
             padding: 12px 20px;
             background: linear-gradient(135deg, rgba(239, 68, 68, 0.1), rgba(255, 111, 145, 0.1));
             border: 2px solid var(--danger);
